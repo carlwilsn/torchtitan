@@ -33,6 +33,8 @@ def log_timer(label: str):
 
 
 _MODULE_FQN = "module_fqn"
+_EP_TOKEN_EXCHANGE = "EP_token_exchange"
+_EP_TOKEN_EXCHANGE_WAIT = "EP_token_exchange_wait"
 _NOT_IN_LAYERS = -1
 
 
@@ -84,8 +86,21 @@ def _annotate_method_once(cls: type, method_name: str, meta: dict[str, str]) -> 
     setattr(cls, method_name, wrapped)
 
 
+def _annotate_function_once(
+    module: object, function_name: str, meta: dict[str, str]
+) -> None:
+    fn = getattr(module, function_name)
+    marker = f"_torchtitan_annotated_{'_'.join(f'{k}_{v}' for k, v in meta.items())}"
+    if getattr(fn, marker, False):
+        return
+    wrapped = annotate_fn(meta)(fn)
+    setattr(wrapped, marker, True)
+    setattr(module, function_name, wrapped)
+
+
 def annotate_moe_ep_regions() -> None:
     """Annotate MoE EP compute, dispatch, and combine regions for FX passes."""
+    from torchtitan.models.common import token_dispatcher
     from torchtitan.models.common.moe import MoE
     from torchtitan.models.common.token_dispatcher import (
         AllToAllTokenDispatcher,
@@ -95,43 +110,17 @@ def annotate_moe_ep_regions() -> None:
     for dispatcher_cls in (LocalTokenDispatcher, AllToAllTokenDispatcher):
         _annotate_method_once(dispatcher_cls, "dispatch", {"EP": "dispatch"})
         _annotate_method_once(dispatcher_cls, "combine", {"EP": "combine"})
+    _annotate_function_once(
+        token_dispatcher,
+        "_dispatch_token_exchange",
+        {_EP_TOKEN_EXCHANGE: "dispatch"},
+    )
+    _annotate_function_once(
+        token_dispatcher,
+        "_combine_token_exchange",
+        {_EP_TOKEN_EXCHANGE: "combine"},
+    )
     _annotate_method_once(MoE, "forward", {"EP": "compute"})
-
-
-# ---------------------------------------------------------------------------
-# Chunk pass utilities
-# ---------------------------------------------------------------------------
-# These helpers are shared by chunk passes and tests around graph_trainer's
-# traced FX metadata. Keep chunk-specific rewrite policy in ep_chunk_pass.py.
-
-
-def _is_module_fqn_inside_root(fqn: str, root_fqn: str) -> bool:
-    return fqn == root_fqn or fqn.startswith(root_fqn + ".")
-
-
-def _tensor_meta(node: torch.fx.Node) -> torch.Tensor | None:
-    val = node.meta.get("val")
-    return val if isinstance(val, torch.Tensor) else None
-
-
-def _free_symbols(value: object) -> frozenset[object]:
-    from torch.fx.experimental.symbolic_shapes import free_symbols
-
-    return frozenset(free_symbols(value))
-
-
-def _dynamic_dim_symbols(val: torch.Tensor, dim: int) -> frozenset[object]:
-    return _free_symbols(val.shape[dim])
-
-
-def _ordered_nodes(gm: torch.fx.GraphModule) -> dict[torch.fx.Node, int]:
-    return {n: i for i, n in enumerate(gm.graph.nodes)}
-
-
-def _earliest_node(
-    nodes: list[torch.fx.Node], order: dict[torch.fx.Node, int]
-) -> torch.fx.Node:
-    return min(nodes, key=lambda n: order[n])
 
 
 def parallelize_inputs(parallel_dims, args, kwargs):

@@ -2120,6 +2120,77 @@ class TestChunkPasses(TestCase):
             )
         )
 
+    def test_token_dispatcher_split_size_cpu_copy_is_sync_under_graph_capture(self):
+        from torchtitan.models.common import token_dispatcher
+        from torchtitan.models.common.token_dispatcher import AllToAllTokenDispatcher
+
+        class FakeMesh:
+            def size(self):
+                return 2
+
+        original_to = torch.Tensor.to
+
+        def run_dispatch(*, is_compiling: bool, is_non_strict_tracing: bool):
+            cpu_non_blocking_args = []
+
+            def recording_to(tensor, *args, **kwargs):
+                if args and args[0] == torch.device("cpu"):
+                    cpu_non_blocking_args.append(kwargs.get("non_blocking"))
+                return original_to(tensor, *args, **kwargs)
+
+            dispatcher = AllToAllTokenDispatcher(
+                AllToAllTokenDispatcher.Config(num_experts=4, top_k=1)
+            )
+            dispatcher.ep_mesh = FakeMesh()
+            x = torch.randn(4, 3)
+            top_scores = torch.ones(4, 1)
+            selected_experts = torch.arange(4, dtype=torch.float32).view(4, 1)
+
+            with (
+                patch.object(
+                    token_dispatcher, "all_to_all_single", lambda x, *_, **__: x
+                ),
+                patch.object(
+                    token_dispatcher,
+                    "_dispatch_token_exchange",
+                    lambda routed_input, *_, **__: routed_input,
+                ),
+                patch.object(
+                    AllToAllTokenDispatcher,
+                    "_permute",
+                    lambda _, routed_input, num_tokens_per_expert_group, *args: (
+                        routed_input.shape,
+                        routed_input,
+                        torch.arange(routed_input.shape[0]),
+                        num_tokens_per_expert_group,
+                    ),
+                ),
+                patch.object(torch.ops._c10d_functional, "wait_tensor", lambda x: x),
+                patch.object(torch.compiler, "is_compiling", return_value=is_compiling),
+                patch.object(
+                    torch.compiler,
+                    "_is_non_strict_tracing",
+                    return_value=is_non_strict_tracing,
+                ),
+                patch.object(torch.Tensor, "to", recording_to),
+            ):
+                dispatcher.dispatch(x, top_scores, selected_experts)
+
+            return cpu_non_blocking_args
+
+        self.assertEqual(
+            run_dispatch(is_compiling=False, is_non_strict_tracing=False),
+            [True, False],
+        )
+        self.assertEqual(
+            run_dispatch(is_compiling=True, is_non_strict_tracing=False),
+            [False, False],
+        )
+        self.assertEqual(
+            run_dispatch(is_compiling=False, is_non_strict_tracing=True),
+            [False, False],
+        )
+
     def test_ep_overlap_reorders_forward_and_backward_token_exchange_blocks(self):
         for backward, first_chunk in ((False, 0), (True, 1)):
             with self.subTest(backward=backward):

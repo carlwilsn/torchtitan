@@ -31,6 +31,8 @@ from collections.abc import Callable
 import torch
 from torch._logging import trace_structured
 
+from torchtitan.experiments.graph_trainer.configs import validate_ep_overlap_config
+
 from torchtitan.experiments.graph_trainer.cpu_offload import apply_cpu_offload_pass
 from torchtitan.experiments.graph_trainer.cudagraph import (
     cudagraph_pass,
@@ -41,15 +43,21 @@ from torchtitan.experiments.graph_trainer.debug_utils import (
     log_graph_diff,
     snapshot_graph,
 )
-from torchtitan.experiments.graph_trainer.configs import (
-    validate_ep_overlap_config,
-)
 from torchtitan.experiments.graph_trainer.ep_chunk_pass import (
     ep_overlap_chunk_pass,
     populate_chunk_dim_metadata_pass,
 )
 from torchtitan.experiments.graph_trainer.ep_eager_chunk import (
     populate_eager_chunk_metadata_pass,
+)
+from torchtitan.experiments.graph_trainer.ep_overlap_pass import (
+    ep_overlap_schedule_pass,
+)
+from torchtitan.experiments.graph_trainer.ep_pass_utils import (
+    concretize_ep_chunk_symbolic_shapes_pass,
+)
+from torchtitan.experiments.graph_trainer.ep_process_group_pass import (
+    isolate_ep_process_group_pass,
 )
 from torchtitan.experiments.graph_trainer.fsdp_passes import (
     joint_transformer_block_bucketing_reordering_pass,
@@ -59,11 +67,15 @@ from torchtitan.experiments.graph_trainer.inductor_passes import (
     full_inductor_compilation_pass,
     regional_inductor_pass,
 )
-from torchtitan.experiments.graph_trainer.make_fx_tracer import TracedResult
+from torchtitan.experiments.graph_trainer.make_fx_tracer import (
+    remove_dead_dtensor_metadata_chains_pass,
+    TracedResult,
+)
 from torchtitan.experiments.graph_trainer.memory_policy import (
     tag_with_memory_policy_pass,
 )
 from torchtitan.experiments.graph_trainer.remove_noop_passes import (
+    remove_dead_code_pass,
     remove_detach_pass,
     remove_identity_slice_pass,
     remove_identity_view_pass,
@@ -147,11 +159,10 @@ def compile_time_passes(
     cudagraph is excluded because it needs to re-capture the graph into
     an in-memory CUDA graph at runtime.
 
-    ``joint_transformer_block_bucketing_reordering_pass`` optionally runs
-    ``overlap_fsdp_ag_rs_pass`` first (gated by
-    ``compile.enable_fsdp_ag_rs_overlap``) so that forward+backward
-    all-gathers end up on a separate CUDA stream from reduce-scatters
-    (enabling AG/RS overlap in backward).
+    ``joint_transformer_block_bucketing_reordering_pass`` optionally applies
+    FSDP AG/RS overlap first (gated by ``compile.enable_fsdp_ag_rs_overlap``)
+    so that forward+backward all-gathers end up on a separate CUDA stream from
+    reduce-scatters (enabling AG/RS overlap in backward).
     """
     from torchtitan.experiments.graph_trainer.common_utils import (
         get_default_transformer_block_buckets,
@@ -166,14 +177,15 @@ def compile_time_passes(
         remove_identity_slice_pass,
         normalize_view_ops_as_reshape,
     ]
+    ep_overlap_chunk_passes: list[Callable] = []
     if "ep_overlap" in config.compile.passes:
         overlap_dim, chunk_strategy, module_fqn = validate_ep_overlap_config(
             config.compile
         )
         if chunk_strategy == "eager":
-            passes.append(populate_eager_chunk_metadata_pass)
-        else:
-            passes.extend(
+            ep_overlap_chunk_passes.append(populate_eager_chunk_metadata_pass)
+        if chunk_strategy == "graph":
+            ep_overlap_chunk_passes.extend(
                 [
                     functools.partial(
                         populate_chunk_dim_metadata_pass,
@@ -205,15 +217,36 @@ def compile_time_passes(
                 defer_n_layers=config.compile.cpu_offload_defer_n_layers,
             ),
             selective_activation_remat_pass,
-            functools.partial(
-                joint_transformer_block_bucketing_reordering_pass,
-                module_bucket_plans=module_bucket_plans,
-                enable_fsdp_ag_rs_overlap=config.compile.enable_fsdp_ag_rs_overlap,
-            ),
         ]
     )
+    passes.extend(ep_overlap_chunk_passes)
+    passes.append(isolate_ep_process_group_pass)
+    passes.append(remove_dead_code_pass)
+    passes.append(
+        functools.partial(
+            joint_transformer_block_bucketing_reordering_pass,
+            module_bucket_plans=module_bucket_plans,
+            enable_fsdp_ag_rs_overlap=config.compile.enable_fsdp_ag_rs_overlap,
+        )
+    )
+    if "ep_overlap" in config.compile.passes:
+        _overlap_dim, _chunk_strategy, module_fqn = validate_ep_overlap_config(
+            config.compile
+        )
+        passes.append(
+            functools.partial(
+                ep_overlap_schedule_pass,
+                module_pattern=module_fqn,
+                require_all_to_all=(
+                    getattr(config.parallelism, "expert_parallel_degree", 1) > 1
+                ),
+            )
+        )
+        passes.append(concretize_ep_chunk_symbolic_shapes_pass)
     if config.parallelism.enable_async_tensor_parallel:
         passes.append(async_tensor_parallel_pass)
+    passes.append(remove_dead_dtensor_metadata_chains_pass)
+    passes.append(remove_dead_code_pass)
 
     inductor_compilation = config.compile.inductor_compilation
     if inductor_compilation == "full":
@@ -349,13 +382,17 @@ def apply_graph_passes(
     logger.info(f"Applying {len(passes)} graph passes:\n  {pass_list}")
     all_passes_start = time.perf_counter()
     tlparse_log_graph_pass(gm, graph_name="make_fx_graph_traced", debug=debug)
+    # Some passes intentionally change placeholder shape metadata. Keep the
+    # pass-local fake inputs in sync so later compiler passes see the same
+    # static/dynamic contract as the FX graph.
+    pass_example_inputs = list(example_inputs)
     for pass_fn in passes:
         pass_name = _get_pass_name(pass_fn)
         if debug:
             tlparse_log_graph_pass(gm, graph_name=f"before_{pass_name}", debug=debug)
             before_snapshot = snapshot_graph(gm)
             start = time.perf_counter()
-        gm = pass_fn(gm, example_inputs)
+        gm = pass_fn(gm, pass_example_inputs)
         assert isinstance(
             gm, torch.fx.GraphModule
         ), f"Pass {pass_name} returned {type(gm).__name__}, expected GraphModule"

@@ -17,6 +17,34 @@ from torchtitan.config import Configurable
 from torchtitan.ops.scatter_add import deterministic_scatter_add
 
 
+def _dispatch_token_exchange(
+    routed_input: torch.Tensor,
+    output_splits: list[int],
+    input_splits: list[int],
+    ep_mesh: DeviceMesh,
+) -> torch.Tensor:
+    return all_to_all_single_autograd(
+        routed_input,
+        output_splits,
+        input_splits,
+        ep_mesh,
+    )
+
+
+def _combine_token_exchange(
+    routed_output: torch.Tensor,
+    input_splits: list[int],
+    output_splits: list[int],
+    ep_mesh: DeviceMesh,
+) -> torch.Tensor:
+    return all_to_all_single_autograd(
+        routed_output,
+        input_splits,
+        output_splits,
+        ep_mesh,
+    )
+
+
 @dataclass(frozen=True, kw_only=True)
 class LocalDispatchMetadata:
     """Metadata returned by LocalTokenDispatcher.dispatch() for use in combine()."""
@@ -284,14 +312,16 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
             num_tokens_per_expert_group = torch.ops._c10d_functional.wait_tensor(
                 num_tokens_per_expert_group
             )
-            # non_blocking=True is safe in eager, but under torch.compile the
-            # async D2H transfer can race with the subsequent .tolist()/.item()
-            # calls, producing stale values and failing unbacked-symint guards.
-            non_blocking = not torch.compiler.is_compiling()
-            input_splits = (
-                num_tokens_per_expert.view(ep_size, -1)
-                .sum(dim=1)
-                .to(torch.device("cpu"), non_blocking=non_blocking)
+            # non_blocking=True is safe in eager, but graph capture records the
+            # following .tolist() reads as split-size scalars. Keep that D2H
+            # copy synchronous under Dynamo and graph_trainer's make_fx tracing
+            # so collective split sizes cannot race with stale CPU values.
+            non_blocking = not (
+                torch.compiler.is_compiling() or torch.compiler._is_non_strict_tracing()
+            )
+            input_splits = num_tokens_per_expert.view(ep_size, -1).sum(dim=1)
+            input_splits = input_splits.to(
+                torch.device("cpu"), non_blocking=non_blocking
             )
             # NOTE: this would incur a device-to-host sync
             output_splits = (
@@ -303,7 +333,7 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
             output_splits_list = output_splits.tolist()
 
         # All-to-all dispatch tokens to EP ranks
-        routed_input = all_to_all_single_autograd(
+        routed_input = _dispatch_token_exchange(
             routed_input,
             output_splits_list,
             input_splits_list,
@@ -420,7 +450,7 @@ class AllToAllTokenDispatcher(LocalTokenDispatcher):
 
         # All-to-all combine: returns AsyncCollectiveTensor — the a2a runs
         # on the NCCL stream and won't block until the tensor is accessed.
-        routed_output = all_to_all_single_autograd(
+        routed_output = _combine_token_exchange(
             routed_output,
             metadata.input_splits,
             metadata.output_splits,

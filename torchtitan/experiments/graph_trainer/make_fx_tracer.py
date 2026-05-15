@@ -24,8 +24,9 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchtitan.experiments.graph_trainer.dynamic_shapes import (
     _fakeify_input,
     _insert_runtime_asserts as _insert_runtime_asserts_pass,
+    _tensor_has_mark_dynamic,
     _tensor_has_mark_unbacked,
-    _wrapper_subclass_has_mark_unbacked,
+    _wrapper_subclass_has_marked_dynamic_dims,
 )
 
 # Tensors and make_fx-safe primitives are allowed as pytree leaves in args.
@@ -155,60 +156,77 @@ def _wrap_subclasses(
     return wrapped
 
 
-def _remove_cpu_shadow_chains(gm: torch.fx.GraphModule) -> None:
-    """Remove dead CPU tensor chains left by DTensor's shadow-op bookkeeping.
+def remove_dead_dtensor_metadata_chains_pass(
+    gm: torch.fx.GraphModule,
+    example_inputs: tuple[Any, ...] | None = None,
+) -> torch.fx.GraphModule:
+    """Remove dead DTensor metadata chains traced as tensor ops.
 
-    DTensor keeps CPU "shadow" copies of tensor metadata (size, stride) as
-    regular aten ops.  After make_fx tracing these ops end up in the graph but
-    never feed a real GPU computation, so they are pure overhead.  This pass
-    finds every chain rooted at a CPU ``empty_strided`` whose outputs never
-    reach a GPU node with downstream users, and erases the whole chain.
+    DTensor may represent size/stride bookkeeping with CPU tensor ops during
+    make_fx tracing.  SAC/remat can also copy those chains.  A chain rooted at
+    CPU ``empty_strided`` is removable only when every descendant is metadata
+    plumbing and no node escapes to graph output or real compute.  After that
+    targeted cleanup, ordinary FX DCE removes dead fake-shadow branches so
+    ``run_traced`` does not execute unused placeholder computations.
 
     TODO: figure out a way to avoid tracing them into graph in the first place.
     """
-    to_remove: set[torch.fx.Node] = set()
+    metadata_targets = {
+        torch.ops.aten.sym_size.default,
+        torch.ops.aten.sym_size.int,
+        torch.ops.aten.sym_stride.default,
+        torch.ops.aten.sym_stride.int,
+        torch.ops.aten.sym_numel.default,
+    }
 
-    for node in gm.graph.nodes:
-        if node in to_remove:
-            continue
-
-        if not (
+    def is_cpu_empty_strided(node: torch.fx.Node) -> bool:
+        return (
             node.op == "call_function"
             and node.target == torch.ops.aten.empty_strided.default
-        ):
-            continue
-        device = node.kwargs.get("device")
-        if device is None or device.type != "cpu":
-            continue
+            and (device := node.kwargs.get("device")) is not None
+            and device.type == "cpu"
+        )
 
-        chain: set[torch.fx.Node] = set()
-        queue = [node]
-        feeds_gpu = False
+    def is_metadata_node(node: torch.fx.Node) -> bool:
+        if node.target in metadata_targets:
+            return True
+        val = node.meta.get("val")
+        return isinstance(val, torch.Tensor) and val.device.type == "cpu"
 
-        while queue and not feeds_gpu:
-            current = queue.pop()
-            if current in chain:
+    cpu_roots = {node for node in gm.graph.nodes if is_cpu_empty_strided(node)}
+
+    candidates: set[torch.fx.Node] = set(cpu_roots)
+    queue = list(candidates)
+    while queue:
+        current = queue.pop()
+        for user in current.users:
+            if user in candidates or user.op == "output":
                 continue
-            chain.add(current)
-            for user in current.users:
-                val = user.meta.get("val")
-                if isinstance(val, torch.Tensor) and val.device.type != "cpu":
-                    if user.users:
-                        feeds_gpu = True
-                        break
-                    chain.add(user)
-                    continue
+            # GPU tensor ops can be metadata-only too when all their inputs are
+            # already in the DTensor metadata chain.
+            if is_metadata_node(user) or all(
+                inp in candidates for inp in user.all_input_nodes
+            ):
+                candidates.add(user)
                 queue.append(user)
 
-        if not feeds_gpu:
-            to_remove |= chain
+    removable: set[torch.fx.Node] = set(candidates)
+    changed = True
+    while changed:
+        changed = False
+        for node in tuple(removable):
+            if any(user not in removable for user in node.users):
+                removable.remove(node)
+                changed = True
 
     for node in reversed(list(gm.graph.nodes)):
-        if node in to_remove:
+        if node in removable:
             gm.graph.erase_node(node)
 
+    gm.graph.eliminate_dead_code()
     gm.graph.lint()
     gm.recompile()
+    return gm
 
 
 def _copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
@@ -393,6 +411,7 @@ def minimal_fx_tracer(
     module: nn.Module | None = None,
     optimizer: "torch.optim.Optimizer | None" = None,
     *,
+    prepare_inputs: Callable[[tuple[Any, ...], dict[str, Any]], None] | None = None,
     _insert_runtime_asserts: bool = False,
 ) -> Callable[..., TracedResult]:
     """Return a tracer that captures ``fn`` with implicit module/optimizer state.
@@ -434,6 +453,9 @@ def minimal_fx_tracer(
     _check_optimizer_has_module(module, optimizer)
 
     def _trace_with_args(*args: Any, **kwargs: Any) -> TracedResult:
+        if prepare_inputs is not None:
+            prepare_inputs(args, kwargs)
+
         model_state, optim_state = extract_train_state(module, optimizer)
         state_fqns = list(model_state.keys())
 
@@ -466,18 +488,16 @@ def minimal_fx_tracer(
         for arg in full_args:
             if not isinstance(arg, torch.Tensor):
                 continue
-            if getattr(arg, "_dynamo_dynamic_indices", None) or getattr(
-                arg, "_dynamo_dynamic_range", None
-            ):
-                raise ValueError("minimal_fx_tracer only supports mark_unbacked()")
-            if _wrapper_subclass_has_mark_unbacked(arg):
+            if _wrapper_subclass_has_marked_dynamic_dims(arg):
                 raise ValueError(
-                    "minimal_fx_tracer only supports mark_unbacked() on plain tensor "
-                    "inputs; wrapper subclasses such as DTensor are not supported"
+                    "minimal_fx_tracer only supports marked dynamic dims on plain "
+                    "tensor inputs; wrapper subclasses such as DTensor are not "
+                    "supported"
                 )
         unwrapped_args, input_layouts = _unwrap_subclasses(full_args)
-        has_mark_unbacked = any(
-            isinstance(a, torch.Tensor) and _tensor_has_mark_unbacked(a)
+        has_marked_dynamic_dim = any(
+            isinstance(a, torch.Tensor)
+            and (_tensor_has_mark_unbacked(a) or _tensor_has_mark_dynamic(a))
             for a in unwrapped_args
         )
 
@@ -490,7 +510,7 @@ def minimal_fx_tracer(
         # land in the ShapeEnv's pending_fresh_unbacked_symbols list.
         ignore_ctx = (
             fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if has_mark_unbacked
+            if has_marked_dynamic_dim
             else nullcontext()
         )
         with ignore_ctx:
@@ -564,7 +584,7 @@ def minimal_fx_tracer(
         # Must run before DCE so that forward nodes used for matching aren't removed.
         _copy_fwd_metadata_to_bw_nodes(traced)
 
-        _remove_cpu_shadow_chains(traced)
+        remove_dead_dtensor_metadata_chains_pass(traced)
         if _insert_runtime_asserts:
             _insert_runtime_asserts_pass(traced, fake_mode)
 

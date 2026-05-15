@@ -177,3 +177,14 @@ def remove_identity_slice_pass(
     gm.graph.lint()
     gm.recompile()
     return gm
+
+
+def remove_dead_code_pass(
+    gm: torch.fx.GraphModule, example_inputs=None
+) -> torch.fx.GraphModule:
+    """Remove dead pure nodes before handing the graph to compiler backends."""
+    if gm.graph.eliminate_dead_code():
+        gm.graph.lint()
+        gm.recompile()
+        logger.info("Removed dead pure nodes from the graph")
+    return gm

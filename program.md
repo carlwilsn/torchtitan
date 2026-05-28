@@ -81,6 +81,13 @@ To set up a new experiment:
    vague "make it runnable" or "bootstrap" label. If the target command needs
    several missing capabilities, split them into separate ordered bootstrap
    ideas and run them one at a time.
+10. **Plan the calibration phase**: before optimization begins, add manager
+    ideas for the first empirical ceilings to measure once a runnable baseline
+    exists. At minimum, plan a constant-token shape sweep, a profiled baseline,
+    a GEMM-roofline microbenchmark plan for the actual Qwen3 matmul shapes, and
+    an NCCL-roofline/overlap microbenchmark plan for the actual FSDP collective
+    payload sizes. These are meta-experiments: they may not become the final
+    candidate, but they should determine which bottleneck is worth attacking.
 
 Begin experimentation after setup is recorded.
 
@@ -301,6 +308,61 @@ pipeline bubbles, data loading, or memory headroom. A good idea should name the
 suspected bottleneck and why the proposed change should improve reported
 tokens/sec on this hardware.
 
+## Calibration Meta-Experiments
+
+Do not start deep optimization by trying knobs blindly. Once the first runnable
+baseline exists, run a short calibration phase whose purpose is to learn the
+empirical ceilings for this exact workload and machine. These runs are
+meta-experiments: record them in `results.tsv`, `ideas.md`, and `learnings.md`,
+but do not treat them as final candidate recipes unless they also represent a
+valid train command and beat the objective.
+
+The calibration phase should happen early, before spending many iterations on
+compile boundaries, attention backends, quantization, custom kernels, NCCL
+flags, or parallelism layouts. If the first runnable baseline is very slow or
+unstable, do only the minimal fixes needed to get a trustworthy 10-step run,
+then calibrate.
+
+At minimum, establish these ceilings:
+
+1. **Shape ceiling**: sweep constant-token shapes early, such as shorter
+   sequence with larger local batch versus longer sequence with smaller local
+   batch. Keep the total tokens per step comparable when possible. Record which
+   shape gives the best throughput, which shape leaves memory headroom, and
+   which shape changes the visible profiler bottleneck. Do this before assuming
+   attention, loss, or compile behavior at the default sequence length is the
+   important problem.
+2. **GEMM ceiling**: identify the dominant Qwen3 matmul shapes from the model
+   and profiler: Q/K/V projection, output projection, FFN gate/up/down, and any
+   quantized variants. Run or write a small isolated benchmark using the same
+   dtype, dimensions, batch/sequence shape, and backend that the candidate uses.
+   Compare achieved TFLOP/s to the hardware peak and to the throughput implied
+   by the training step. This answers whether optimizing matmul kernels can
+   plausibly move end-to-end `tps`.
+3. **Communication ceiling**: identify the FSDP all-gather and reduce-scatter
+   payload sizes and run NCCL microbenchmarks for those sizes on the same
+   topology. Also run at least one overlap probe that executes representative
+   GEMM work concurrently with the collective when feasible. This answers
+   whether flags such as NVLS, CTA policy, channel count, protocol, stream
+   priority, or sharding granularity are attacking real exposed communication or
+   just moving noise.
+4. **Step budget**: from the first useful profiler trace, build a simple budget
+   in `learnings.md`: GEMM/MXFP8 kernels, NCCL all-gather, NCCL
+   reduce-scatter, attention, RoPE/norm, loss, optimizer, dataloader, launch
+   overhead, and idle gaps. For each bucket, estimate the maximum possible
+   end-to-end improvement if that bucket became free. Do not spend many
+   experiments on a bucket whose maximum possible gain is too small.
+5. **Control ceilings**: when unclear, run diagnostic upper-bound controls such
+   as fake/random input data, no profiler, no optimizer step, no loss compile,
+   single-rank/no-NCCL, or isolated loss-only timing. These controls are not
+   candidate recipes; they exist to separate data loading, loss, optimizer,
+   communication, and model compute costs.
+
+Future autoresearch should prefer a slightly slower first day that produces
+these ceilings over a long blind knob search. The question after calibration is
+not merely "what improved tps?", but "which measured ceiling says this idea can
+still improve tps enough to matter?"
+
 Explore freely from the current best runnable implementation. Do not inspect or
 copy non-Qwen3 model `parallelize.py` or `sharding.py` files as references; they
 are intentionally scaffolded for this experiment. Each source or config change
@@ -353,10 +415,13 @@ Example:
 <train command> --training.steps=10 > run.log 2>&1
 ```
 
-Every experiment-loop run must include `--training.steps=10` or an equivalent
-CLI override that makes TorchTitan report `total steps 10` at startup. Treat a
-run with any other step count as invalid for comparison and rerun with the
-10-step cap.
+Every experiment-loop training run must include `--training.steps=10` or an
+equivalent CLI override that makes TorchTitan report `total steps 10` at
+startup. Treat a training run with any other step count as invalid for
+comparison and rerun with the 10-step cap. Calibration microbenchmarks that are
+not TorchTitan training commands are exempt from the step-count requirement,
+but their exact command, measured units, and reason for running must be recorded
+in `learnings.md` and `results.tsv`.
 
 For profiler-driven idea generation, enable TorchTitan's profiler on a normal
 10-step run, for example:
@@ -382,6 +447,9 @@ For roofline notes, combine hardware properties with measured metrics:
 - profiler evidence for dominant kernels, memory stalls, GPU idle time, and
   collective latency
 - known memory bandwidth and interconnect/topology limits when available
+- calibration measurements: isolated GEMM TFLOP/s at the actual Qwen3 shapes,
+  isolated NCCL bandwidth/latency at the actual FSDP payload sizes, overlap
+  probes, constant-token shape sweep results, and any no-op/control ceilings
 
 The manager writes a short roofline conclusion in `learnings.md` when it guides
 the next idea: compute-bound, memory-bound, communication-bound,
@@ -527,6 +595,15 @@ Columns:
 6. short description of the implementation/config idea
 7. exact command used
 
+For calibration microbenchmarks that are not valid TorchTitan training
+candidates, use `0` for `tokens_per_sec`, `N/A` for `mfu_percent`, the measured
+or relevant peak memory when available, and `keep` if the measurement produced
+useful ceiling information. Prefix the description with `calibration:` and put
+the actual measured number and units in the description, for example
+`calibration: bf16 gate/up GEMM 742 TFLOP/s` or
+`calibration: reduce-scatter 512MiB 820 GB/s`. These rows are evidence, not
+candidate winners.
+
 Example:
 
 ```
@@ -559,6 +636,10 @@ Worker/Executor loop:
    choose a hypothesis backed by a recent profiler observation, roofline
    conclusion, or documented hardware/software behavior. State the expected
    mechanism before editing.
+   If the first runnable baseline exists but the calibration phase has not yet
+   produced a shape ceiling, a profiled step budget, a GEMM ceiling, and a
+   communication ceiling, prefer the missing calibration meta-experiment unless
+   the current best is too unstable to measure.
    For the first experiment on a new branch, also state why this is exactly one
    change from the locked baseline and list any important knobs intentionally
    left unchanged.
@@ -566,16 +647,27 @@ Worker/Executor loop:
    only `torchtitan/models/qwen3/parallelize.py` and
    `torchtitan/models/qwen3/sharding.py` unless changing launch config knobs in
    the command or an allowed `qwen3_14b()` field. The diff must contain only
-   code that is actually exercised by the candidate command.
-5. Run import/syntax checks.
-6. Commit the candidate source/config changes. Include the selected idea name
-   or ID in the commit message.
+   code that is actually exercised by the candidate command. Calibration
+   microbenchmarks often require no source/config edit; in that case leave the
+   source tree unchanged and record the planned diagnostic command in the logs.
+5. Run import/syntax checks when source/config changed. For a no-edit
+   calibration microbenchmark, skip syntax checks and record why.
+6. Commit the candidate source/config changes when there are any. Include the
+   selected idea name or ID in the commit message. Do not create an empty commit
+   for a no-edit calibration microbenchmark; commit the resulting `results.tsv`,
+   `ideas.md`, and `learnings.md` updates after the measurement.
 7. Run the training command once with `--training.steps=10` and output
-   redirected to `run.log`.
+   redirected to `run.log`. If the selected idea is a non-training calibration
+   microbenchmark, run that diagnostic command once instead and redirect output
+   to an appropriate log file.
 8. Use that one run for both correctness and performance. If correctness fails,
    inspect logs, fix obvious bugs, and retry only as needed for diagnosis. If
-   the idea is fundamentally broken, log `crash` or `discard`.
-9. Extract tokens/sec, MFU, peak memory, convergence, and failure signals.
+   the idea is fundamentally broken, log `crash` or `discard`. For calibration
+   microbenchmarks, use the run only to extract the ceiling measurement and
+   update the roofline budget.
+9. Extract tokens/sec, MFU, peak memory, convergence, and failure signals for
+   training candidates. For calibration microbenchmarks, extract the measured
+   ceiling and units, plus any relevant memory, bandwidth, or overlap signal.
 10. Append a row to `results.tsv`.
 11. Commit `results.tsv` plus any Manager-made or Manager-proposed `ideas.md`
     and `learnings.md` updates that should be recorded with this experiment
@@ -592,13 +684,18 @@ Manager loop:
    run logs, profiler traces, and structured metrics.
 2. Review each completed experiment and update `learnings.md` with detailed
    conclusions, including profile/roofline interpretation and any confounders.
-3. Update `ideas.md`: cross out tried-and-discarded ideas, mark kept ideas with
+3. Maintain a calibration checklist in `learnings.md` until it is complete:
+   shape ceiling, profiled step budget, GEMM ceiling, communication ceiling,
+   overlap/control ceilings, and the current interpretation of which bucket can
+   still move end-to-end `tps`. If any calibration item is missing, propose it
+   before proposing speculative optimization knobs.
+4. Update `ideas.md`: cross out tried-and-discarded ideas, mark kept ideas with
    commit and measured tokens/sec, reprioritize remaining ideas, and add newly
    researched ideas under `## Manager Generated Ideas`.
-4. Keep researching. Use recent results, profiler traces, roofline analysis,
+5. Keep researching. Use recent results, profiler traces, roofline analysis,
    hardware properties, and relevant documentation to generate more ideas for
    the worker.
-5. Do not commit. Leave `ideas.md` and `learnings.md` edits for the worker to
+6. Do not commit. Leave `ideas.md` and `learnings.md` edits for the worker to
    review and commit.
 
 Profiling And Roofline:
@@ -609,6 +706,14 @@ Profiling And Roofline:
 - Use roofline analysis based on the actual hardware properties recorded during
   setup. Do not assume the trace is at hardware roofline; estimate whether
   kernels are leaving compute, bandwidth, or communication headroom.
+- Build and maintain an explicit step budget. For each bucket, record both the
+  observed share of step time and the maximum possible end-to-end gain if that
+  bucket were removed. Do not spend many experiments on a bucket whose budget
+  cannot materially improve reported `tps`.
+- Use empirical ceilings, not only vendor peak numbers. For matmul, compare the
+  training kernels against isolated GEMM performance at the same shapes. For
+  FSDP collectives, compare the trace against measured NCCL bandwidth/latency
+  for the same payload sizes and against an overlap probe when possible.
 
 One-idea rule:
 
@@ -674,5 +779,6 @@ NEVER STOP!
 
 Do not stop after one successful run. Continue until the human interrupts you or
 provides a new instruction. If ideas run low, run a profiled 10-step pass on
-the current best, update the roofline notes, and choose the next narrow change
-from the observed bottleneck.
+the current best, update the step budget and roofline notes, refresh any stale
+calibration ceiling that no longer matches the current best's shape/operator
+mix, and choose the next narrow change from the observed bottleneck.

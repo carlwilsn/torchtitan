@@ -407,9 +407,8 @@ class RLTrainer(Configurable):
     async def setup_async(
         self,
         *,
-        host_mesh=None,
-        trainer_nodes: int | None = None,
-        generator_nodes: int | None = None,
+        trainer_host_mesh=None,
+        generator_host_mesh=None,
         gpus_per_node: int | None = None,
     ):
         """Spawn Monarch actors on separate meshes and initialize weights.
@@ -424,16 +423,15 @@ class RLTrainer(Configurable):
         called before :meth:`train`.
 
         Args:
-            host_mesh: Optional multi-node HostMesh. When provided,
-                whole nodes are dedicated to trainer vs generator
-                roles instead of partitioning GPUs on a single host.
-            trainer_nodes: Number of nodes for the trainer (required when
-                host_mesh is provided).
-            generator_nodes: Number of nodes for the generator (required when
-                host_mesh is provided).
-            gpus_per_node: GPUs per node, assumed to be the same across all
-                nodes (no heterogeneous node configurations). Required when
-                host_mesh is provided.
+            trainer_host_mesh: Optional HostMesh of dedicated trainer
+                nodes. When provided (together with ``generator_host_mesh``
+                and ``gpus_per_node``), whole nodes are dedicated to
+                trainer vs generator roles instead of partitioning GPUs
+                on a single host.
+            generator_host_mesh: Optional HostMesh of dedicated generator
+                nodes. Required when ``trainer_host_mesh`` is provided.
+            gpus_per_node: Physical GPUs per node, assumed homogeneous
+                across all nodes. Required when host meshes are provided.
         """
         config = self.config
 
@@ -453,23 +451,20 @@ class RLTrainer(Configurable):
             f"{self.trainer_world_size} trainer GPUs = {total_gpus} total"
         )
 
-        self._multi_node = host_mesh is not None
+        self._multi_node = trainer_host_mesh is not None
 
         # TODO(observability): the mesh_spawn span wraps ~80 LoC of branching
         # provisioner logic. Pull a Provisioner.spawn_meshes(...) helper and
         # shrink this span to a single call.
         with sl.log_trace_span("mesh_spawn"):
-            if host_mesh is not None:
-                # Multi-node mode: dedicate whole nodes to trainer vs generator
-                if (
-                    trainer_nodes is None
-                    or generator_nodes is None
-                    or gpus_per_node is None
-                ):
+            if self._multi_node:
+                if generator_host_mesh is None or gpus_per_node is None:
                     raise ValueError(
-                        "trainer_nodes, generator_nodes, and gpus_per_node are "
-                        "required when host_mesh is provided"
+                        "trainer_host_mesh, generator_host_mesh, and "
+                        "gpus_per_node must all be provided together"
                     )
+                trainer_nodes = trainer_host_mesh.sizes["hosts"]
+                generator_nodes = generator_host_mesh.sizes["hosts"]
                 # Validate that world sizes are evenly divisible by node counts
                 assert self.trainer_world_size % trainer_nodes == 0, (
                     f"trainer_world_size ({self.trainer_world_size}) must be "
@@ -484,11 +479,6 @@ class RLTrainer(Configurable):
                 # world size and number of nodes allocated to that role
                 trainer_gpus_per_node = self.trainer_world_size // trainer_nodes
                 generator_gpus_per_node = self.generator_world_size // generator_nodes
-
-                trainer_host_mesh = host_mesh.slice(hosts=slice(0, trainer_nodes))
-                generator_host_mesh = host_mesh.slice(
-                    hosts=slice(trainer_nodes, trainer_nodes + generator_nodes)
-                )
 
                 # Use Provisioner to set CUDA_VISIBLE_DEVICES so each role
                 # only sees its own GPUs and doesn't conflict with other
@@ -891,8 +881,15 @@ class RLTrainer(Configurable):
         logger.info("=" * 60)
 
 
-async def main():
-    config = ConfigManager().parse_args()
+async def train_main(
+    *,
+    config: "RLTrainer.Config | None" = None,
+    trainer_host_mesh=None,
+    generator_host_mesh=None,
+    gpus_per_node: int | None = None,
+):
+    if config is None:
+        config = ConfigManager().parse_args()
     sl.init_structured_logger(
         source="rl_controller",
         output_dir=config.dump_folder,
@@ -904,7 +901,11 @@ async def main():
 
     rl_trainer = RLTrainer(config)
     try:
-        await rl_trainer.setup_async()
+        await rl_trainer.setup_async(
+            trainer_host_mesh=trainer_host_mesh,
+            generator_host_mesh=generator_host_mesh,
+            gpus_per_node=gpus_per_node,
+        )
         await rl_trainer.train()
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Interrupted; attempting graceful shutdown...")
@@ -913,4 +914,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(train_main())

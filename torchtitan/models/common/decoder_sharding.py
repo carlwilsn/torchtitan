@@ -186,9 +186,9 @@ def set_gqa_inner_attention_local_map(
     )
     inner_attention_cfg.sharding_config = ShardingConfig(
         in_dst_shardings={
-            "q": q_placements,
-            "k": kv_placements,
-            "v": kv_placements,
+            "q_BLNH": q_placements,
+            "k_BLNH": kv_placements,
+            "v_BLNH": kv_placements,
         },
         out_src_shardings=out_src,
         local_map=LocalMapConfig(

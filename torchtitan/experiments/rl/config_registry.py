@@ -202,7 +202,7 @@ def rl_grpo_qwen3_14b() -> RLTrainer.Config:
 
 
 def rl_grpo_qwen3_0_6b_batch_invariant() -> RLTrainer.Config:
-    """On-policy GRPO config for Qwen3-0.6B under same parallelism (4 GPUs: 2 gen + 2 train).
+    """Batch-invariant variant of the Qwen3-0.6B GRPO config.
 
     Enables deterministic + batch-invariant mode for true on-policy RL training.
     """
@@ -250,7 +250,7 @@ def rl_grpo_qwen3_0_6b_batch_invariant() -> RLTrainer.Config:
         generator=VLLMGenerator.Config(
             model_dtype="bfloat16",
             parallelism=ParallelismConfig(
-                tensor_parallel_degree=2,
+                tensor_parallel_degree=4,
                 data_parallel_replicate_degree=1,
                 enable_sequence_parallel=False,
                 disable_loss_parallel=True,
@@ -270,14 +270,15 @@ def rl_grpo_qwen3_0_6b_batch_invariant() -> RLTrainer.Config:
 def rl_grpo_qwen3_debug_batch_invariant() -> RLTrainer.Config:
     """Batch-invariant GRPO config using debug model with random init (4 GPUs: 2 gen + 2 train).
 
-    Uses the tiny debugmodel (dim=256, 8 layers, vocab=2048) with random
-    initialization — no HF checkpoint needed. Fits on A10G (22 GB) GPUs.
+    Mirrors the Qwen3-0.6B GRPO config, but uses the tiny debugmodel
+    (dim=256, 8 layers, vocab=2048) with random initialization.
     """
     batch_invariant_config = DebugConfig(batch_invariant=True, deterministic=True)
-    group_size = 4
+    group_size = 8
     return RLTrainer.Config(
         model_spec=model_registry("debugmodel", attn_backend="varlen"),
-        num_steps=5,
+        hf_assets_path="./tests/assets/tokenizer",
+        num_steps=10,
         num_prompts_per_step=5,
         num_validation_samples=20,
         compile=CompileConfig(enable=True, backend="aot_eager"),
@@ -285,12 +286,15 @@ def rl_grpo_qwen3_debug_batch_invariant() -> RLTrainer.Config:
         validation_env=SumDigitsEnv.Config(
             seed=99, correctness_reward=1.0, format_reward=0.3
         ),
+        metrics=MetricsProcessor.Config(enable_wandb=True),
         trainer=PolicyTrainer.Config(
-            optimizer=OptimizersContainer.Config(lr=8e-4),
+            optimizer=OptimizersContainer.Config(lr=2e-6),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2,
                 decay_type="linear",
             ),
+            # bfloat16 is needed for trainer to align with generator dtype
+            # TODO: replace bfloat16 enablement with FSDP2+TP2
             training=TrainingConfig(dtype="bfloat16"),
             parallelism=ParallelismConfig(
                 data_parallel_shard_degree=1,
@@ -298,6 +302,7 @@ def rl_grpo_qwen3_debug_batch_invariant() -> RLTrainer.Config:
                 enable_sequence_parallel=False,
                 disable_loss_parallel=True,
             ),
+            checkpoint=CheckpointManager.Config(enable=False),
             debug=batch_invariant_config,
             loss=GRPOLoss.Config(),
         ),
@@ -306,12 +311,15 @@ def rl_grpo_qwen3_debug_batch_invariant() -> RLTrainer.Config:
             parallelism=ParallelismConfig(
                 tensor_parallel_degree=2,
                 data_parallel_replicate_degree=1,
+                enable_sequence_parallel=False,
+                disable_loss_parallel=True,
             ),
+            checkpoint=CheckpointManager.Config(enable=False),
             sampling=SamplingConfig(
                 n=group_size,
-                temperature=1.0,
+                temperature=0.8,
                 top_p=0.95,
-                max_tokens=50,
+                max_tokens=100,
             ),
             debug=batch_invariant_config,
         ),

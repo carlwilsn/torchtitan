@@ -12,10 +12,10 @@ import torch.nn as nn
 
 from torch.distributed.tensor import Replicate
 
-from torchtitan.config import Configurable
 from torchtitan.models.common.decoder_sharding import dense_param_placement
 from torchtitan.models.common.nn_modules import Linear
 from torchtitan.protocols.model import ModelConfigConverter
+from torchtitan.protocols.module import Module
 from torchtitan.protocols.sharding import ShardingConfig
 from torchtitan.tools.logging import logger
 
@@ -105,14 +105,14 @@ def _get_lora_cls(parent_cls: type) -> type:
 
 
 @dataclass(kw_only=True, slots=True)
-class FrozenConfig(Configurable.Config):
-    """Config wrapper that freezes all parameters at build time.
+class FrozenConfig(Module.Config):
+    """Config wrapper that freezes direct parameters at build time.
 
-    Works with any ``Module.Config`` — used by ``LoRAConverter`` to freeze
-    non-target Linear modules.
+    Child modules are frozen by their own configs so wrapping a composite module
+    does not recursively freeze nested LoRA adapters.
     """
 
-    inner: Configurable.Config
+    inner: Module.Config
 
     def __getattr__(self, name: str):
         try:
@@ -122,14 +122,19 @@ class FrozenConfig(Configurable.Config):
         return getattr(inner, name)
 
     def __setattr__(self, name: str, value) -> None:
-        if name in type(self).__slots__:
+        if name in {f.name for f in fields(type(self))}:
             object.__setattr__(self, name, value)
         else:
             setattr(self.inner, name, value)
 
     def build(self, **kwargs):
+        if self.param_init is not None:
+            self.inner.param_init = self.param_init
+        if self.sharding_config is not None:
+            self.inner.sharding_config = self.sharding_config
         instance = self.inner.build(**kwargs)
-        instance.requires_grad_(False)
+        for param in instance.parameters(recurse=False):
+            param.requires_grad_(False)
         return instance
 
 
@@ -189,19 +194,24 @@ class LoRAConverter(ModelConfigConverter):
         )
 
     def convert(self, model_config) -> None:
-        """Walk the model config tree for Linear modules.
+        """Walk the module config tree once.
 
         Target Linear modules get their config replaced with
-        ``LoRALinear.Config``.  Non-target Linear modules are wrapped
-        with ``FrozenConfig``.
+        ``LoRALinear.Config``. All other module configs are wrapped with
+        ``FrozenConfig`` so LoRA training updates only adapter parameters.
         """
         matched = set()
 
-        # First pass: replace target Linears with LoRA, freeze non-targets
-        for fqn, cfg, parent, attr in model_config.traverse(Linear.Config):
+        for fqn, cfg, parent, attr in model_config.traverse(
+            Module.Config, recurse=True
+        ):
             last_segment = fqn.rsplit(".", 1)[-1]
             is_target = (
-                self.target_modules is None or last_segment in self.target_modules
+                isinstance(cfg, Linear.Config)
+                and (
+                    self.target_modules is None
+                    or last_segment in self.target_modules
+                )
             )
             if is_target:
                 new_cfg = self._make_lora_config(cfg)

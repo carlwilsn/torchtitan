@@ -73,7 +73,7 @@ class Configurable:
             }
 
         def traverse(
-            self, config_cls: type, *, _prefix: str = ""
+            self, config_cls: type, *, recurse: bool = False, _prefix: str = ""
         ) -> Iterator[tuple[str, "Configurable.Config", object, str | int]]:
             """Yield ``(fqn, config, parent, field_name)`` for every nested config of *config_cls*.
 
@@ -85,21 +85,37 @@ class Configurable:
 
                 for fqn, cfg, parent, attr in model_config.traverse(Linear.Config):
                     setattr(parent, attr, NewConfig(...))
+
+            When ``recurse`` is ``True``, traversal continues into matching
+            configs after yielding them.  The default preserves the historical
+            behavior where matching a config stops descent into that subtree.
             """
             for f in fields(self):
                 val = getattr(self, f.name)
                 fqn = f"{_prefix}.{f.name}" if _prefix else f.name
                 if isinstance(val, config_cls):
                     yield fqn, val, self, f.name
+                    if recurse and hasattr(val, "traverse"):
+                        yield from val.traverse(
+                            config_cls, recurse=recurse, _prefix=fqn
+                        )
                 elif isinstance(val, list):
                     for i, item in enumerate(val):
                         item_fqn = f"{fqn}.{i}"
                         if isinstance(item, config_cls):
                             yield item_fqn, item, val, i
+                            if recurse and hasattr(item, "traverse"):
+                                yield from item.traverse(
+                                    config_cls, recurse=recurse, _prefix=item_fqn
+                                )
                         elif hasattr(item, "traverse"):
-                            yield from item.traverse(config_cls, _prefix=item_fqn)
+                            yield from item.traverse(
+                                config_cls, recurse=recurse, _prefix=item_fqn
+                            )
                 elif hasattr(val, "traverse"):
-                    yield from val.traverse(config_cls, _prefix=fqn)
+                    yield from val.traverse(
+                        config_cls, recurse=recurse, _prefix=fqn
+                    )
 
         def build(self, **kwargs):
             """Construct the owning class. Auto-wired by __init_subclass__.

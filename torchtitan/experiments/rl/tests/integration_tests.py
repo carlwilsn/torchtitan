@@ -77,7 +77,8 @@ def build_rl_h100_test_list() -> list[OverrideDefinitions]:
                 [
                     "--module rl",
                     "--config rl_grpo_qwen3_debug_batch_invariant",
-                    "--batcher.batch.seq_len 256",
+                    "--batcher.batch.seq_len 768",
+                    "--generator.sampling.max_tokens 50",
                     "--metrics.no-enable-wandb",
                     "--config rl_grpo_qwen3_debug_batch_invariant",
                     "--metrics.no-enable-wandb",

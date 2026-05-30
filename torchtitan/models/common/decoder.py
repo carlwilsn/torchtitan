@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import dataclasses
+import os
 from dataclasses import dataclass
 
 import torch
@@ -18,6 +19,8 @@ from torchtitan.models.common.attention import (
     FlexAttention,
     get_causal_mask_mod,
     get_document_mask_mod,
+    get_packed_causal_document_mask_mod,
+    get_packed_causal_document_offsets_mask_mod,
     VarlenAttention,
 )
 from torchtitan.models.common.feed_forward import FeedForward
@@ -248,7 +251,31 @@ class Decoder(BaseModel):
                 B = 1
             case "block_causal":
                 B = positions.shape[0]
-                mask_mods.append(get_document_mask_mod(positions))
+                match os.environ.get("TORCHTITAN_DOCUMENT_MASK"):
+                    case "packed_causal":
+                        mask_mods = [get_packed_causal_document_mask_mod(positions)]
+                    case "packed_offsets":
+                        if positions.shape[0] != 1:
+                            raise ValueError(
+                                "TORCHTITAN_DOCUMENT_MASK=packed_offsets requires "
+                                f"batch size 1, got {positions.shape[0]}"
+                            )
+                        doc_starts = (positions[0] == 0).nonzero(as_tuple=True)[0]
+                        offsets = torch.cat(
+                            [
+                                doc_starts,
+                                torch.tensor(
+                                    [positions.shape[1]],
+                                    dtype=doc_starts.dtype,
+                                    device=doc_starts.device,
+                                ),
+                            ]
+                        ).to(torch.int32)
+                        mask_mods = [
+                            get_packed_causal_document_offsets_mask_mod(offsets)
+                        ]
+                    case _:
+                        mask_mods.append(get_document_mask_mod(positions))
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {attn_config.mask_type}"

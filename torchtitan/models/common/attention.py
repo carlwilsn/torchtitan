@@ -50,6 +50,8 @@ __all__ = [
     "create_varlen_metadata_for_document",
     "get_causal_mask_mod",
     "get_document_mask_mod",
+    "get_packed_causal_document_mask_mod",
+    "get_packed_causal_document_offsets_mask_mod",
     "get_fixed_block_mask_mod",
     "get_sliding_window_mask_mod",
 ]
@@ -335,6 +337,47 @@ def get_document_mask_mod(positions: torch.Tensor) -> _mask_mod_signature:
         return doc_ids[b, q_idx] == doc_ids[b, kv_idx]
 
     return document_mask
+
+
+def get_packed_causal_document_mask_mod(
+    positions: torch.Tensor,
+) -> _mask_mod_signature:
+    """Creates a causal document mask with one contiguous KV interval per row.
+
+    This assumes per-token positions reset to 0 at each packed document boundary
+    and then increase by 1 within the document.
+    """
+
+    def packed_causal_document_mask(
+        b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
+    ) -> torch.Tensor:
+        doc_start = q_idx - positions[b, q_idx]
+        return (kv_idx >= doc_start) & (q_idx >= kv_idx)
+
+    return packed_causal_document_mask
+
+
+def get_packed_causal_document_offsets_mask_mod(
+    offsets: torch.Tensor,
+) -> _mask_mod_signature:
+    """Creates a causal document mask from packed document offsets.
+
+    This assumes one shared packed document layout. It is appropriate for
+    single-sample batches or workloads where every batch item has identical
+    document boundaries.
+    """
+    document_id = torch.repeat_interleave(
+        torch.arange(offsets.numel() - 1, device=offsets.device, dtype=torch.int32),
+        offsets[1:] - offsets[:-1],
+    )
+
+    def packed_causal_document_offsets_mask(
+        b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
+    ) -> torch.Tensor:
+        doc_start = offsets[document_id[q_idx]]
+        return (kv_idx >= doc_start) & (q_idx >= kv_idx)
+
+    return packed_causal_document_offsets_mask
 
 
 def get_fixed_block_mask_mod(fixed_block_size: int) -> _mask_mod_signature:

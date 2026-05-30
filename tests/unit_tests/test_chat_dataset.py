@@ -15,7 +15,12 @@ from datasets import Dataset
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.components.tokenizer import HuggingFaceTokenizer
 from torchtitan.hf_datasets.text_datasets import ChatDataLoader, ChatDataset
-from torchtitan.models.common.attention import get_document_mask_mod
+from torchtitan.models.common.attention import (
+    get_causal_mask_mod,
+    get_document_mask_mod,
+    get_packed_causal_document_mask_mod,
+    get_packed_causal_document_offsets_mask_mod,
+)
 
 # Path to the test tokenizer and fixture data
 _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets")
@@ -484,6 +489,52 @@ class TestDocumentMaskBlocksCrossDocAttention(unittest.TestCase):
                 b, h, torch.tensor(len(packed) - 1), torch.tensor(boundary)
             ).item(),
         )
+
+    def test_packed_causal_document_mask_matches_standard_mask(self):
+        positions = torch.tensor(
+            [
+                [0, 1, 2, 0, 1, 0, 1, 2],
+                [0, 1, 0, 1, 2, 3, 0, 1],
+            ]
+        )
+        causal_mask = get_causal_mask_mod()
+        document_mask = get_document_mask_mod(positions)
+        packed_mask = get_packed_causal_document_mask_mod(positions)
+        h = torch.tensor(0)
+
+        for b in range(positions.shape[0]):
+            b_tensor = torch.tensor(b)
+            for q_idx in range(positions.shape[1]):
+                q_tensor = torch.tensor(q_idx)
+                for kv_idx in range(positions.shape[1]):
+                    kv_tensor = torch.tensor(kv_idx)
+                    expected = causal_mask(
+                        b_tensor, h, q_tensor, kv_tensor
+                    ) & document_mask(b_tensor, h, q_tensor, kv_tensor)
+                    self.assertEqual(
+                        packed_mask(b_tensor, h, q_tensor, kv_tensor).item(),
+                        expected.item(),
+                    )
+
+    def test_packed_causal_offsets_document_mask_matches_standard_mask(self):
+        positions = torch.tensor([[0, 1, 2, 0, 1, 0, 1, 2]])
+        offsets = torch.tensor([0, 3, 5, 8], dtype=torch.int32)
+        causal_mask = get_causal_mask_mod()
+        document_mask = get_document_mask_mod(positions)
+        packed_offsets_mask = get_packed_causal_document_offsets_mask_mod(offsets)
+        b, h = torch.tensor(0), torch.tensor(0)
+
+        for q_idx in range(positions.shape[1]):
+            q_tensor = torch.tensor(q_idx)
+            for kv_idx in range(positions.shape[1]):
+                kv_tensor = torch.tensor(kv_idx)
+                expected = causal_mask(b, h, q_tensor, kv_tensor) & document_mask(
+                    b, h, q_tensor, kv_tensor
+                )
+                self.assertEqual(
+                    packed_offsets_mask(b, h, q_tensor, kv_tensor).item(),
+                    expected.item(),
+                )
 
 
 if __name__ == "__main__":

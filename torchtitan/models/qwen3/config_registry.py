@@ -4,6 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from dataclasses import replace
+
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.loss import ChunkedCELoss
 from torchtitan.components.lr_scheduler import LRSchedulersContainer
@@ -247,6 +249,33 @@ def qwen3_32b() -> Trainer.Config:
             mode="full",
         ),
     )
+
+
+def qwen3_32b_flex() -> Trainer.Config:
+    config = qwen3_32b()
+    config.model_spec = model_registry("32B", attn_backend="flex")
+    return config
+
+
+def qwen3_32b_flex_8192() -> Trainer.Config:
+    config = qwen3_32b_flex()
+    config.training.seq_len = 8192
+    config.training.local_batch_size = 1
+    config.model_spec.model.rope = replace(
+        config.model_spec.model.rope, max_seq_len=8192
+    )
+    return config
+
+
+def qwen3_32b_flex_flash_8192() -> Trainer.Config:
+    config = qwen3_32b()
+    config.model_spec = model_registry("32B", attn_backend="flex_flash")
+    config.training.seq_len = 8192
+    config.training.local_batch_size = 1
+    config.model_spec.model.rope = replace(
+        config.model_spec.model.rope, max_seq_len=8192
+    )
+    return config
 
 
 def qwen3_debugmodel_fused_qkv() -> Trainer.Config:

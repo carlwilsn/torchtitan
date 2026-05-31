@@ -113,9 +113,7 @@ class Configurable:
                                 config_cls, recurse=recurse, _prefix=item_fqn
                             )
                 elif hasattr(val, "traverse"):
-                    yield from val.traverse(
-                        config_cls, recurse=recurse, _prefix=fqn
-                    )
+                    yield from val.traverse(config_cls, recurse=recurse, _prefix=fqn)
 
         def build(self, **kwargs):
             """Construct the owning class. Auto-wired by __init_subclass__.

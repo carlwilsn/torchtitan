@@ -12,7 +12,7 @@ Each function returns a complete ``RLTrainer.Config`` and is discoverable by
 """
 
 from torchtitan.components.lr_scheduler import LRSchedulersContainer
-from torchtitan.components.optimizer import OptimizersContainer
+from torchtitan.components.optimizer import default_adamw, OptimizersContainer
 from torchtitan.config.configs import (
     CompileConfig,
     DebugConfig,
@@ -41,7 +41,7 @@ def rl_grpo_qwen3_0_6b() -> RLTrainer.Config:
             seed=99, correctness_reward=1.0, format_reward=0.3
         ),
         trainer=PolicyTrainer.Config(
-            optimizer=OptimizersContainer.Config(lr=2e-6),
+            optimizer=OptimizersContainer.Config(param_groups=default_adamw(lr=2e-6)),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2,
                 decay_type="linear",
@@ -85,7 +85,7 @@ def rl_grpo_qwen3_1_7b() -> RLTrainer.Config:
             seed=99, correctness_reward=1.0, format_reward=0.3
         ),
         trainer=PolicyTrainer.Config(
-            optimizer=OptimizersContainer.Config(lr=2e-6),
+            optimizer=OptimizersContainer.Config(param_groups=default_adamw(lr=2e-6)),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2,
                 decay_type="linear",
@@ -130,7 +130,7 @@ def rl_grpo_qwen3_14b() -> RLTrainer.Config:
             seed=99, correctness_reward=1.0, format_reward=0.3
         ),
         trainer=PolicyTrainer.Config(
-            optimizer=OptimizersContainer.Config(lr=1e-6),
+            optimizer=OptimizersContainer.Config(param_groups=default_adamw(lr=1e-6)),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2,
                 decay_type="linear",
@@ -173,7 +173,7 @@ def rl_grpo_qwen3_debug() -> RLTrainer.Config:
             seed=99, correctness_reward=1.0, format_reward=0.3
         ),
         trainer=PolicyTrainer.Config(
-            optimizer=OptimizersContainer.Config(lr=8e-4),
+            optimizer=OptimizersContainer.Config(param_groups=default_adamw(lr=8e-4)),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2,
                 decay_type="linear",
@@ -220,7 +220,7 @@ def rl_grpo_qwen3_0_6b_batch_invariant() -> RLTrainer.Config:
             seed=99, correctness_reward=1.0, format_reward=0.3
         ),
         trainer=PolicyTrainer.Config(
-            optimizer=OptimizersContainer.Config(lr=2e-6),
+            optimizer=OptimizersContainer.Config(param_groups=default_adamw(lr=2e-6)),
             lr_scheduler=LRSchedulersContainer.Config(
                 warmup_steps=2,
                 decay_type="linear",

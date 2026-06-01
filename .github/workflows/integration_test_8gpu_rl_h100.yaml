@@ -96,3 +96,11 @@ jobs:
         python -m torchtitan.experiments.rl.tests.integration_tests \
           $RUNNER_TEMP/artifacts-to-be-uploaded --test_suite h100 --ngpu 4 \
           --hf_assets_path "$MODEL_PATH"
+
+        # RL Loss Guard: deterministic loss regression check
+        LOSS_FILE="tests/assets/losses/rl_grpo_cuda.txt"
+        python torchtitan/experiments/rl/scripts/loss_compare.py \
+          --hf-assets-path "$MODEL_PATH" \
+          --dump-folder "$RUNNER_TEMP/rl_loss_guard" \
+          --import-result "$LOSS_FILE" \
+          --assert-equal

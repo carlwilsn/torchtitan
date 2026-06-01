@@ -131,8 +131,8 @@ def run_training(
 ) -> None:
     """Run RL GRPO training as a subprocess."""
     cmd = [
-        "python",
-        "torchtitan/experiments/rl/grpo.py",
+        sys.executable,
+        "-m", "torchtitan.experiments.rl.grpo",
         "--module", "rl",
         "--config", config,
         f"--hf_assets_path={hf_assets_path}",
@@ -141,7 +141,12 @@ def run_training(
 
     log_print(f"Running: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd)
+    repo_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)
+        ))))
+    )
+    result = subprocess.run(cmd, env=os.environ, cwd=repo_root)
     if result.returncode != 0:
         log_print(f"Training failed with return code {result.returncode}")
         sys.exit(1)

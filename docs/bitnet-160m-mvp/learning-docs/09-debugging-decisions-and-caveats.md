@@ -337,3 +337,22 @@ Possible explanations to investigate:
 5. Weight tying or output head handling affects counts.
 
 The correct response is not to guess; add explicit tests/instrumentation.
+
+## 2026-06-08 update: why the 100-step result is useful but limited
+
+The 100-step shakedown was the right next rung after the smoke test because it tested more of the real experiment loop without pretending to be full training. It verified:
+
+- stock and BitNet can both run beyond a trivial 3-step smoke,
+- checkpoint save works for both,
+- artifacts can be collected locally,
+- the rented GPU can be terminated after use.
+
+Important caveats remain:
+
+- The single-GPU FSDP workaround was still used.
+- Validation was configured but not observed as a clear metric.
+- Checkpoint resume was not tested.
+- BitNet being slightly lower loss at step 100 is not a quality claim.
+- BitNet was slower and slightly higher memory in this fake-quant version, which is expected.
+
+The result should be described as: "100-step one-GPU shakedown passed," not "BitNet 160M is trained" or "BitNet beats stock."

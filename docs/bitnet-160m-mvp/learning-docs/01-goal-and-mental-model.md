@@ -74,3 +74,18 @@ The MVP is the first end-to-end rung on the path from “custom layer works” t
 ## Current cost state
 
 The rented Lambda GPU was used for short smoke tests. After your cost concern, the lifecycle tool was checked and reported no active instances. The GPU is not currently running from the lifecycle tool’s view.
+
+## 2026-06-08 update: 100-step shakedown completed
+
+After the original 3-step smoke test, a bounded 100-step stock-vs-BitNet shakedown was run on a Lambda A10. This moved the evidence from "the integration can enter the train loop" to "both variants can complete a short controlled experiment loop with checkpoint saves."
+
+Results summary:
+
+| Run | Step 1 loss | Step 100 loss | Last 10 avg loss | Avg tokens/sec | Checkpoints |
+| --- | ---: | ---: | ---: | ---: | --- |
+| stock `llama3_160m` | 8.12197 | 2.78636 | 2.86142 | 3571.7 | step-50, step-100 |
+| BitNet `llama3_160m_bitnet` | 7.99145 | 2.75976 | 2.82334 | 1875.9 | step-50, step-100 |
+
+This still is not full training. It proves short-run stability, checkpoint save, artifact collection, and cost-controlled GPU operation. It does not prove model quality, validation correctness, checkpoint resume, or BitNet performance advantage.
+
+Full record: [`../experiments/2026-06-08-100-step-shakedown/README.md`](../experiments/2026-06-08-100-step-shakedown/README.md).

@@ -235,3 +235,21 @@ If you can answer these, you understand the current MVP:
 8. What did the smoke test prove and not prove?
 9. What metadata must be copied when replacing `Linear.Config`?
 10. What must be monitored in the next real experiment?
+
+## 2026-06-08 update: next tasks after the completed 100-step shakedown
+
+The suggested 100-step stock-vs-BitNet comparison has now been completed. The next work order should change accordingly:
+
+1. **Validation-focused probe** — force/locate validation metrics and document exactly where TorchTitan emits them.
+2. **Checkpoint-resume probe** — resume both stock and BitNet from step-100 or a fresh step-50 checkpoint.
+3. **Converter accounting probe** — reconcile `84` logged swaps vs `98` direct `BitLinear` modules.
+4. **Clean workaround patch** — make the single-GPU no-FSDP behavior an explicit reproducible option or find an environment where degree-1 FSDP works.
+5. **1k-step comparison** — only after validation/resume are understood, run a longer cost-bounded loss curve.
+
+Updated proof state:
+
+- 3-step smoke: done.
+- 100-step train/checkpoint shakedown: done.
+- validation metric: not yet confirmed.
+- resume: not yet confirmed.
+- multi-GPU/FSDP: not yet confirmed.

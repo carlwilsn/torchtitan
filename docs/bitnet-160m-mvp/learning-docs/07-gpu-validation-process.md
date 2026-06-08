@@ -268,3 +268,33 @@ Reasons:
 - Random initialization.
 
 The loss values are useful only as evidence that the loss was finite and training loop progressed.
+
+## 2026-06-08 update: 100-step stock-vs-BitNet shakedown
+
+A second GPU loop was completed after the 3-step smoke test. It used the same one-A10, single-rank style but ran 100 optimizer steps for each variant and enabled checkpoint saves.
+
+Common overrides:
+
+```bash
+--training.steps 100
+--training.local-batch-size 1
+--training.seq-len 128
+--activation-checkpoint.mode none
+--parallelism.data-parallel-shard-degree 1
+--checkpoint.enable
+--checkpoint.interval 50
+--checkpoint.keep-latest-k 2
+--validator.freq 50
+--validator.steps 2
+```
+
+Outcome:
+
+- stock `llama3_160m` completed 100/100 steps, final loss `2.78636`, checkpoints at step 50 and step 100.
+- BitNet `llama3_160m_bitnet` completed 100/100 steps, final loss `2.75976`, checkpoints at step 50 and step 100.
+- BitNet was slower in this fake-quant implementation: about `1875.9` average tokens/sec vs `3571.7` for stock.
+- BitNet logged slightly higher memory: `1.37 GiB` vs `1.28 GiB`.
+- Validation was configured but no clear validation metric line was observed in captured logs.
+- The GPU was terminated after artifacts were collected; final lifecycle check showed no active instances.
+
+Interpretation: the 100-step run proves bounded operational stability and checkpoint-save behavior. It does not prove quality or scaling.

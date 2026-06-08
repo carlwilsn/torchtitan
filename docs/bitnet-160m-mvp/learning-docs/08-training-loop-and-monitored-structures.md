@@ -249,3 +249,39 @@ Missing tests to add later:
 - Verify disabling `activation_quant`, `weight_quant`, or `pre_norm` changes behavior as expected.
 - Add a tiny trainer-level test if TorchTitan supports one in CI.
 - Add checkpoint save/load test for `BitLinear`.
+
+## 2026-06-08 update: metrics monitored in the 100-step shakedown
+
+The 100-step run produced raw logs, structured logs, parsed CSVs, and a parsed summary JSON. The monitored structures were:
+
+- per-step training loss,
+- gradient norm,
+- tokens/sec,
+- logged GPU memory,
+- model parameter count,
+- BitNet converter swap count,
+- checkpoint file creation,
+- process exit status.
+
+Key final log evidence:
+
+```text
+stock step: 100  loss: 2.78636  grad_norm: 3.8125  memory: 1.28GiB  tps: 3,565
+BitNet step: 100  loss: 2.75976  grad_norm: 2.5156  memory: 1.37GiB  tps: 1,912
+```
+
+Checkpoint evidence:
+
+```text
+stock_checkpoints/step-50/.metadata
+stock_checkpoints/step-50/__0_0.distcp
+stock_checkpoints/step-100/.metadata
+stock_checkpoints/step-100/__0_0.distcp
+
+bitnet_checkpoints/step-50/.metadata
+bitnet_checkpoints/step-50/__0_0.distcp
+bitnet_checkpoints/step-100/.metadata
+bitnet_checkpoints/step-100/__0_0.distcp
+```
+
+The validation data structure is still unresolved: validation was configured, but no clear validation metric was observed in logs.

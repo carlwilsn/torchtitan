@@ -169,6 +169,55 @@ def _debugmodel_fused_qkv(attn_backend: str) -> Llama3Model.Config:
     )
 
 
+def _160m(attn_backend: str) -> Llama3Model.Config:
+    """~160M-parameter Llama-style rung using the local test tokenizer.
+
+    This flavor deliberately uses vocab_size=2048 so it can run with
+    ``tests/assets/tokenizer`` without gated Llama assets. With a real 128k
+    Llama tokenizer, embeddings dominate and this same transformer body becomes
+    a substantially larger model.
+    """
+
+    dim = 1024
+    n_heads = 16
+    n_kv_heads = 4
+    n_layers = 14
+    vocab_size = 2048
+    return Llama3Model.Config(
+        dim=dim,
+        vocab_size=vocab_size,
+        enable_weight_tying=True,
+        tok_embeddings=Embedding.Config(
+            num_embeddings=vocab_size,
+            embedding_dim=dim,
+            param_init=_EMBEDDING_INIT,
+        ),
+        norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
+        lm_head=Linear.Config(
+            in_features=dim,
+            out_features=vocab_size,
+            param_init=_output_linear_init(dim),
+        ),
+        rope=RoPE.Config(
+            dim=dim // n_heads,
+            max_seq_len=131072,
+            theta=500000,
+            backend="complex",
+            scaling="llama",
+        ),
+        layers=_build_llama3_layers(
+            n_layers=n_layers,
+            dim=dim,
+            n_heads=n_heads,
+            n_kv_heads=n_kv_heads,
+            hidden_dim=compute_ffn_hidden_dim(
+                dim, multiple_of=256, ffn_dim_multiplier=1.0
+            ),
+            attn_backend=attn_backend,
+        ),
+    )
+
+
 def _1b(attn_backend: str) -> Llama3Model.Config:
     dim = 2048
     n_heads = 32

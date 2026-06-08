@@ -4,6 +4,10 @@ This folder documents the first TorchTitan-based BitNet reproduction rung.
 
 The goal is **not** to observe the paper's headline 3B-scale result yet. The goal is to make a small, end-to-end, scalable training path that teaches and exercises the same TorchTitan mechanisms needed later: model config registry, converter-based model surgery, FSDP-compatible module configs, dataloading, metrics, checkpointing, and launch/debug flow.
 
+For a detailed learning walkthrough of what was built, why it was built that way, how each file/function works, what was monitored, what failed, and what remains next, read:
+
+- [learning/README.md](learning/README.md) — index for the multi-file implementation walkthrough.
+
 ## Current implementation state
 
 Implemented in this checkout:

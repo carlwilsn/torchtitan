@@ -132,6 +132,66 @@ def llama3_debugmodel_ce_loss() -> Trainer.Config:
     return config
 
 
+def llama3_160m() -> Trainer.Config:
+    """~160M stock TorchTitan Llama-style training rung.
+
+    This is the framework-sanity rung: same TorchTitan trainer, dataloader,
+    metrics, activation checkpointing, and checkpointing path as the BitNet
+    config, but with ordinary Linear layers.
+    """
+
+    return Trainer.Config(
+        loss=ChunkedCELoss.Config(),
+        hf_assets_path="./tests/assets/tokenizer",
+        model_spec=model_registry("160M"),
+        optimizer=OptimizersContainer.Config(lr=3e-4),
+        lr_scheduler=LRSchedulersContainer.Config(
+            warmup_steps=20,
+            decay_ratio=0.8,
+            decay_type="linear",
+            min_lr_factor=0.1,
+        ),
+        training=TrainingConfig(
+            local_batch_size=2,
+            seq_len=512,
+            steps=100,
+            dtype="bfloat16",
+        ),
+        dataloader=HuggingFaceTextDataLoader.Config(dataset="c4_test"),
+        metrics=MetricsProcessor.Config(log_freq=1),
+        checkpoint=CheckpointManager.Config(
+            interval=50,
+            last_save_model_only=False,
+        ),
+        activation_checkpoint=ActivationCheckpointConfig(mode="selective"),
+        validator=Validator.Config(freq=50, steps=10),
+    )
+
+
+def llama3_160m_bitnet() -> Trainer.Config:
+    """~160M BitNet b1.58-style TorchTitan training rung.
+
+    This config uses the same model shape and training settings as
+    ``llama3_160m`` but swaps internal Linear layers to BitLinear through the
+    converter mechanism. The lm_head/output projection is intentionally left as
+    a normal Linear by the converter's default filter.
+    """
+
+    config = llama3_160m()
+    config.model_spec = model_registry(
+        "160M",
+        converters=[
+            BitLinearConverter.Config(
+                filter_fqns=["output", "lm_head"],
+                activation_quant=True,
+                weight_quant=True,
+                pre_norm=True,
+            )
+        ],
+    )
+    return config
+
+
 def llama3_8b() -> Trainer.Config:
     return Trainer.Config(
         loss=ChunkedCELoss.Config(),

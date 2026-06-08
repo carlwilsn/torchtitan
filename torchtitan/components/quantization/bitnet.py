@@ -47,23 +47,30 @@ def activation_quant(x: torch.Tensor, eps: float = _EPS) -> torch.Tensor:
     For an activation tensor shaped like ``[..., hidden]``, compute one scale
     per token/vector over the last dimension, quantize to signed int8 range,
     then dequantize back to the original dtype for ordinary PyTorch matmul.
+
+    The final ``x + (y - x).detach()`` form is important: the forward sees the
+    quantized/dequantized value ``y``, while the backward sees identity through
+    the unquantized activation ``x`` rather than through ``round``/``clamp``.
     """
 
     scale = 127.0 / x.abs().amax(dim=-1, keepdim=True).clamp_min(eps)
-    y = _ste_round(x * scale).clamp(-128, 127) / scale
-    return y.to(dtype=x.dtype)
+    y = torch.round(x * scale).clamp(-128, 127) / scale
+    y = y.to(dtype=x.dtype)
+    return x + (y - x).detach()
 
 
 def weight_quant(w: torch.Tensor, eps: float = _EPS) -> torch.Tensor:
     """Absmean ternary weight quantization with STE.
 
     Forward values are scaled ternary values. Gradients flow to the latent
-    full-precision weights through the STE identity path.
+    full-precision weights through an identity STE, including for values that
+    were clipped to the ternary endpoints in the forward pass.
     """
 
-    scale = 1.0 / w.abs().mean().clamp_min(eps)
-    u = _ste_round(w * scale).clamp(-1, 1) / scale
-    return u.to(dtype=w.dtype)
+    gamma = w.abs().mean().clamp_min(eps)
+    y = torch.round(w / gamma).clamp(-1, 1) * gamma
+    y = y.to(dtype=w.dtype)
+    return w + (y - w).detach()
 
 
 class BitLinear(Module):

@@ -82,12 +82,24 @@ MODULE=llama3 CONFIG=llama3_160m_bitnet NGPU=1 LOG_RANK=0 ./run_train.sh \
 
 ## Results summary
 
-Status: **running / pending**.
+Status: **not completed; stopped before training to protect cost**.
+
+What happened:
+
+1. A Lambda `gpu_1x_a10` instance was launched for the controlled loop.
+2. The first launch attempts spent time in `booting`; one later became reachable.
+3. The repo/environment setup began on the reachable instance.
+4. Unit tests were confirmed on the instance during setup, but the 100-step stock/BitNet commands were **not** launched.
+5. When asked for status, the instance was checked directly:
+   - GPU utilization: `0%`
+   - GPU memory: `0 MiB / 23028 MiB`
+   - no `torchrun`, `run_train.sh`, or training Python process was active
+6. Because the instance was idle and setup was not finished, it was terminated to avoid spending more rental time.
 
 | Run | Steps requested | Completed? | Final train loss | Validation? | Checkpoint? | Notes |
 | --- | ---: | --- | ---: | --- | --- | --- |
-| stock `llama3_160m` | 100 | pending | pending | pending | pending | pending |
-| BitNet `llama3_160m_bitnet` | 100 | pending | pending | pending | pending | pending |
+| stock `llama3_160m` | 100 | no | n/a | not tested | not tested | command was planned but not launched |
+| BitNet `llama3_160m_bitnet` | 100 | no | n/a | not tested | not tested | command was planned but not launched |
 
 ## Raw artifacts
 
@@ -107,7 +119,20 @@ Expected artifacts:
 
 ## Interpretation
 
-Pending.
+This experiment record is useful as a staged plan, but it is **not a result**. It should not be read as evidence about BitNet learning behavior.
+
+The important operational lesson is that a longer run should be launched only after the setup is scripted end-to-end enough that the agent can:
+
+1. provision the GPU,
+2. sync the repo,
+3. create/activate the environment,
+4. apply any single-GPU workaround reproducibly,
+5. launch the stock and BitNet jobs under `tmux` or another durable session,
+6. stream logs,
+7. pull artifacts,
+8. terminate the instance.
+
+The cost-control decision was correct: once the instance was confirmed idle and no training process was running, it was terminated instead of continuing setup interactively.
 
 ## Follow-up questions
 

@@ -1,0 +1,81 @@
+DATE=2026-06-08T02:39:26+00:00
+HOST=129-213-83-89
+NVIDIA A10, 570.148.08, 23028 MiB
+python 3.10.12 (main, May 27 2025, 17:12:29) [GCC 11.4.0]
+torch 2.11.0+cu128
+cuda_available True
+cuda 12.8
+REMOTE_PATCHES
+torchtitan/models/llama3/parallelize.py-16-    MixedPrecisionPolicy,
+torchtitan/models/llama3/parallelize.py-17-)
+torchtitan/models/llama3/parallelize.py-18-try:
+torchtitan/models/llama3/parallelize.py:19:    from torch.distributed.fsdp import DataParallelMeshDims
+torchtitan/models/llama3/parallelize.py-20-except ImportError:
+torchtitan/models/llama3/parallelize.py-21-    from typing import NamedTuple
+torchtitan/models/llama3/parallelize.py-22-
+torchtitan/models/llama3/parallelize.py:23:    class DataParallelMeshDims(NamedTuple):
+torchtitan/models/llama3/parallelize.py-24-        shard: tuple[str, ...]
+torchtitan/models/llama3/parallelize.py-25-        replicate: tuple[str, ...]
+torchtitan/models/llama3/parallelize.py-26-
+--
+torchtitan/models/llama3/parallelize.py-114-        and parallel_dims.tp == 1
+torchtitan/models/llama3/parallelize.py-115-        and parallel_dims.pp == 1
+torchtitan/models/llama3/parallelize.py-116-    ):
+torchtitan/models/llama3/parallelize.py:117:        logger.info("Skipping FSDP for single-rank controlled BitNet experiment")
+torchtitan/models/llama3/parallelize.py-118-        return model
+torchtitan/models/llama3/parallelize.py-119-
+torchtitan/models/llama3/parallelize.py-120-    # Always run apply_fsdp -- with shard_degree=1 it is a no-op for the
+--
+torchtitan/models/llama3/parallelize.py-159-    pp_enabled: bool,
+torchtitan/models/llama3/parallelize.py-160-    cpu_offload: bool = False,
+torchtitan/models/llama3/parallelize.py-161-    reshard_after_forward_policy: str = "default",
+torchtitan/models/llama3/parallelize.py:162:    dp_mesh_dims: "DataParallelMeshDims | None" = None,
+torchtitan/models/llama3/parallelize.py-163-    enable_symm_mem: bool = False,
+torchtitan/models/llama3/parallelize.py-164-):
+torchtitan/models/llama3/parallelize.py-165-    """
+--
+torchtitan/distributed/full_dtensor.py-8-
+torchtitan/distributed/full_dtensor.py-9-When ``parallelism.full_dtensor`` is enabled, all model parameters,
+torchtitan/distributed/full_dtensor.py-10-buffers, and inputs become DTensors on a multi-dimensional SPMD mesh.
+torchtitan/distributed/full_dtensor.py:11:FSDP uses ``DataParallelMeshDims`` to identify which mesh axes
+torchtitan/distributed/full_dtensor.py-12-are data-parallel.
+torchtitan/distributed/full_dtensor.py-13-
+torchtitan/distributed/full_dtensor.py-14-TP, CP, and EP shardings are handled by ``Module.parallelize(parallel_dims)``
+--
+torchtitan/distributed/full_dtensor.py-21-import torch.nn as nn
+torchtitan/distributed/full_dtensor.py-22-from torch.distributed.device_mesh import DeviceMesh
+torchtitan/distributed/full_dtensor.py-23-try:
+torchtitan/distributed/full_dtensor.py:24:    from torch.distributed.fsdp import DataParallelMeshDims
+torchtitan/distributed/full_dtensor.py-25-except ImportError:
+torchtitan/distributed/full_dtensor.py-26-    from typing import NamedTuple
+torchtitan/distributed/full_dtensor.py-27-
+torchtitan/distributed/full_dtensor.py:28:    class DataParallelMeshDims(NamedTuple):
+torchtitan/distributed/full_dtensor.py-29-        shard: tuple[str, ...]
+torchtitan/distributed/full_dtensor.py-30-        replicate: tuple[str, ...]
+torchtitan/distributed/full_dtensor.py-31-from torch.distributed.tensor import DTensor, Replicate, Shard
+--
+torchtitan/distributed/full_dtensor.py-66-            )
+torchtitan/distributed/full_dtensor.py-67-
+torchtitan/distributed/full_dtensor.py-68-
+torchtitan/distributed/full_dtensor.py:69:def _get_dp_mesh_axes(parallel_dims: ParallelDims) -> DataParallelMeshDims:
+torchtitan/distributed/full_dtensor.py:70:    """Build ``DataParallelMeshDims`` for dense (non-MoE) parameters.
+torchtitan/distributed/full_dtensor.py-71-
+torchtitan/distributed/full_dtensor.py-72-    ``dp_shard`` is always included (force-kept-alive in the SPMD mesh
+torchtitan/distributed/full_dtensor.py-73-    even at size 1) so FSDP can pick the DP submesh out of the multi-axis
+--
+torchtitan/distributed/full_dtensor.py-89-
+torchtitan/distributed/full_dtensor.py-90-    replicate = "dp_replicate" if parallel_dims.dp_replicate_enabled else None
+torchtitan/distributed/full_dtensor.py-91-
+torchtitan/distributed/full_dtensor.py:92:    return DataParallelMeshDims(shard=shard, replicate=replicate)
+torchtitan/distributed/full_dtensor.py-93-
+torchtitan/distributed/full_dtensor.py-94-
+torchtitan/distributed/full_dtensor.py-95-_DENSE_SPMD_AXES = ["dp_replicate", "dp_shard", "cp", "tp"]
+--
+torchtitan/distributed/full_dtensor.py-97-
+torchtitan/distributed/full_dtensor.py-98-def resolve_fsdp_mesh(
+torchtitan/distributed/full_dtensor.py-99-    parallel_dims: ParallelDims,
+torchtitan/distributed/full_dtensor.py:100:) -> tuple[DeviceMesh, DataParallelMeshDims]:
+torchtitan/distributed/full_dtensor.py:101:    """Select the dense SPMD mesh and DataParallelMeshDims for full_dtensor."""
+torchtitan/distributed/full_dtensor.py-102-    spmd_mesh = parallel_dims.get_activated_mesh(_DENSE_SPMD_AXES)
+torchtitan/distributed/full_dtensor.py-103-    assert spmd_mesh is not None
+torchtitan/distributed/full_dtensor.py-104-    return spmd_mesh, _get_dp_mesh_axes(parallel_dims)

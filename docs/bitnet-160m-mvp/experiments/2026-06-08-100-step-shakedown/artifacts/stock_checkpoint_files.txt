@@ -1,0 +1,4 @@
+/home/ubuntu/bitnet_100step_artifacts/stock_checkpoints/step-100/.metadata
+/home/ubuntu/bitnet_100step_artifacts/stock_checkpoints/step-100/__0_0.distcp
+/home/ubuntu/bitnet_100step_artifacts/stock_checkpoints/step-50/.metadata
+/home/ubuntu/bitnet_100step_artifacts/stock_checkpoints/step-50/__0_0.distcp

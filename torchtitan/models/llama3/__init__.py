@@ -417,6 +417,7 @@ def _405b(attn_backend: str) -> Llama3Model.Config:
 llama3_configs = {
     "debugmodel": _debugmodel,
     "debugmodel_fused_qkv": _debugmodel_fused_qkv,
+    "160M": _160m,
     "1B": _1b,
     "3B": _3b,
     "8B": _8b,

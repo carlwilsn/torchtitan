@@ -12,7 +12,7 @@ from torchtitan.components.optimizer import (
     OptimizersContainer,
     OptimizersInBackwardContainer,
 )
-from torchtitan.components.quantization import Float8LinearConverter
+from torchtitan.components.quantization import BitLinearConverter, Float8LinearConverter
 from torchtitan.components.validate import Validator
 from torchtitan.config import (
     ActivationCheckpointConfig,

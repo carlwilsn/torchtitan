@@ -7,6 +7,7 @@ The goal is **not** to observe the paper's headline 3B-scale result yet. The goa
 For a detailed learning walkthrough of what was built, why it was built that way, how each file/function works, what was monitored, what failed, and what remains next, read:
 
 - [learning/README.md](learning/README.md) — index for the multi-file implementation walkthrough.
+- [experiments/README.md](experiments/README.md) — controlled follow-up experiment records after the initial smoke test.
 
 ## Current implementation state
 

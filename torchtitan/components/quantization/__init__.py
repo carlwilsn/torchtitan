@@ -32,6 +32,12 @@ class QuantizationConverter(ModelConfigConverter):
 
 
 # Re-export all public symbols so callers can import from the package directly.
+from .bitnet import (  # noqa: F401, E402
+    BitLinear,
+    BitLinearConverter,
+    activation_quant,
+    weight_quant,
+)
 from .float8 import (  # noqa: F401, E402
     Float8GroupedExpertsConverter,
     Float8Linear,
@@ -44,6 +50,10 @@ from .mx import (  # noqa: F401, E402
 )
 
 __all__ = [
+    "BitLinear",
+    "BitLinearConverter",
+    "activation_quant",
+    "weight_quant",
     "Float8GroupedExpertsConverter",
     "Float8Linear",
     "Float8LinearConverter",

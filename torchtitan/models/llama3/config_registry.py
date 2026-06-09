@@ -17,6 +17,7 @@ from torchtitan.components.validate import Validator
 from torchtitan.config import (
     ActivationCheckpointConfig,
     CompileConfig,
+    DebugConfig,
     ParallelismConfig,
     TrainingConfig,
 )
@@ -138,12 +139,21 @@ def llama3_160m() -> Trainer.Config:
     This is the framework-sanity rung: same TorchTitan trainer, dataloader,
     metrics, activation checkpointing, and checkpointing path as the BitNet
     config, but with ordinary Linear layers.
+
+    Seed-locked: ``debug.seed`` is fixed so model-init RNG is reproducible.
+    ``llama3_160m_bitnet`` inherits this config, so the stock and BitNet runs
+    initialize weights from the SAME seed. Combined with the dataloader's
+    hard-coded shuffle/interleave seed (42), both variants see an identical
+    weight init AND identical data order -- so their step-0 losses match and
+    any later divergence is attributable to quantization, not RNG. Override on
+    the CLI with ``--debug.seed N`` to run additional seeds.
     """
 
     return Trainer.Config(
         loss=ChunkedCELoss.Config(),
         hf_assets_path="./tests/assets/tokenizer",
         model_spec=model_registry("160M"),
+        debug=DebugConfig(seed=42),
         optimizer=OptimizersContainer.Config(lr=3e-4),
         lr_scheduler=LRSchedulersContainer.Config(
             warmup_steps=20,

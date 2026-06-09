@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
@@ -332,7 +333,34 @@ class Validator(BaseValidator):
         else:
             global_avg_loss = float(loss.item())
 
-        self.metrics_processor.log_validation(loss=global_avg_loss, step=step)
+        # Mean cross-entropy over the validation set; perplexity = exp(loss).
+        # exp() can overflow to inf for a large/early loss -> guard so the
+        # structured logger doesn't choke on a non-finite scalar.
+        global_avg_perplexity = float(math.exp(global_avg_loss))
+        if not math.isfinite(global_avg_perplexity):
+            global_avg_perplexity = float("inf")
+
+        self.metrics_processor.log_validation(
+            loss=global_avg_loss,
+            step=step,
+            extra_metrics={"validation_metrics/perplexity": global_avg_perplexity},
+        )
+
+        # Emit the real validation cross-entropy loss and perplexity to the
+        # structured JSONL stream (the same path that already carries
+        # ``*_valid_tokens``). Without this, validation only reached the
+        # TensorBoard/WandB logger -- both disabled by default -- so the JSONL
+        # logs from the 100-step shakedown contained valid-token COUNTS but no
+        # actual validation loss. Field names:
+        #   eval.loss        -- mean CE over the validation set (nats/token)
+        #   eval.perplexity  -- exp(eval.loss)
+        # A non-finite (overflowed) perplexity is omitted here, because the
+        # JSONL handler serializes via json and ``inf`` is not valid JSON;
+        # eval.loss always lands, so the number is still recoverable.
+        scalars: dict[str, float | int] = {"eval.loss": global_avg_loss}
+        if math.isfinite(global_avg_perplexity):
+            scalars["eval.perplexity"] = global_avg_perplexity
+        sl.log_trace_scalar(scalars)
 
         # Set model back to train mode
         for model in model_parts:

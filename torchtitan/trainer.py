@@ -811,6 +811,14 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful, Configurable):
                 global_avg_loss = global_max_loss = float(loss.detach().item())
                 global_ntokens_seen = self.ntokens_seen
 
+        # Emit the training loss to the structured JSONL stream alongside the
+        # token counts. Previously the train loss reached ONLY the
+        # TensorBoard/WandB logger (both off by default), so the JSONL had token
+        # counts but no loss -- making it impossible to verify, from the logs
+        # alone, that two seed-locked runs agree at step 0. Field name:
+        #   train.loss  -- global average CE over valid tokens (nats/token)
+        sl.log_trace_scalar({"train.loss": float(global_avg_loss)})
+
         extra_metrics = {
             "n_tokens_seen": global_ntokens_seen,
             "lr": lr,

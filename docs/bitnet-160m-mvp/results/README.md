@@ -27,7 +27,12 @@ telemetry; these curves are the experiment signal). Re-extract numbers with
 ```
 
 Seed 42 (committed `debug.seed=42`), single Lambda A10, torch `2.12.0.dev20260408+cu128`.
-Degree-1 FSDP guard re-applied on the box (env-only, uncommitted).
+Degree-1 FSDP guard: at run time this was an env-only on-box patch; it is **now
+committed** in `torchtitan/models/llama3/parallelize.py` (skip `apply_fsdp` when
+`fsdp_enabled`/`dp_replicate_enabled`/`pp_enabled`/`full_dtensor` are all false), so a
+clean checkout runs single-GPU without re-patching. Note: the committed form mirrors the
+on-box logic but was not itself re-smoke-tested on a fresh box — first clean-clone run
+should confirm `loss.backward()` succeeds.
 
 ## Headline numbers
 

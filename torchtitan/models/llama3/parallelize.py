@@ -94,8 +94,30 @@ def parallelize_llama(
     if model_compile_enabled:
         apply_compile(model, compile_config)
 
-    # Always run apply_fsdp -- with shard_degree=1 it is a no-op for the
-    # all-gather but still installs the MixedPrecisionPolicy.
+    # Apply FSDP only when some data-parallel / pipeline degree actually shards
+    # or replicates the model. On a single rank with every degree == 1
+    # (dp_shard=cp=dp_replicate=pp=1 and not full_dtensor), `fully_shard` is NOT
+    # a harmless no-op: it installs FSDP hooks that leave the unsharded params in
+    # a lazy-init state, and the first `loss.backward()` raises
+    #   "tensor ... data is not allocated yet".
+    # This was the uncommitted on-box guard for the single-GPU BitNet 160M runs
+    # (see docs/bitnet-160m-mvp/learning-docs/12). For any real multi-GPU config
+    # (`fsdp_enabled`, `dp_replicate_enabled`, `pp_enabled`, or `full_dtensor`)
+    # the original FSDP path runs unchanged.
+    fsdp_needed = (
+        parallelism.full_dtensor
+        or parallel_dims.fsdp_enabled
+        or parallel_dims.dp_replicate_enabled
+        or parallel_dims.pp_enabled
+    )
+
+    if not fsdp_needed:
+        logger.info(
+            "Skipping FSDP: all parallel degrees are 1 on a single rank; "
+            "running dense (no sharding)."
+        )
+        return model
+
     if parallelism.full_dtensor:
         dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
     else:

@@ -28,7 +28,7 @@ Both runs used **identical** training flags; only `CONFIG` (`llama3_160m` vs `ll
 
 This is ~`55.7M` tokens per run versus the shakedown's `12,800` — about **4,350× more tokens**. The shakedown's central limitation (loss noise an order of magnitude larger than the gap) is exactly what this budget was sized to beat.
 
-> **Env note (carry forward):** the degree-1 single-GPU FSDP guard (`parallelize.py`, skip `apply_fsdp` when `dp_shard<=1 and not dp_replicate and not pp and not full_dtensor`) was re-applied on the box, **uncommitted**. Without it, `loss.backward()` crashes with "tensor … data is not allocated yet". The device mesh logged `active dimensions: []` — confirming FSDP was correctly skipped and training ran dense on one GPU.
+> **Env note (carry forward):** the degree-1 single-GPU FSDP guard skips `apply_fsdp` when no parallel degree actually shards/replicates the model. Without it, `loss.backward()` crashes with "tensor … data is not allocated yet" (the device mesh logs `active dimensions: []`, confirming FSDP was correctly skipped and training ran dense on one GPU). At run time this was an **uncommitted on-box patch**; it is **now committed** in `torchtitan/models/llama3/parallelize.py` — it early-returns when `fsdp_enabled`/`dp_replicate_enabled`/`pp_enabled`/`full_dtensor` are all false, using the framework's own `parallel_dims.fsdp_enabled` property (= `dp_shard>1 or cp>1`) so any real multi-GPU config runs the original FSDP path unchanged. **Honest caveat:** the committed form mirrors the on-box logic that ran these 1700 steps but was not itself re-smoke-tested on a fresh box — the first clean-clone run should confirm `loss.backward()` succeeds before trusting it blindly.
 
 ---
 

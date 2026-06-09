@@ -16,6 +16,8 @@ The goal is to let you reconstruct what was built, why it was built that way, wh
 8. [Training loop and monitored structures](08-training-loop-and-monitored-structures.md)
 9. [Debugging decisions and caveats](09-debugging-decisions-and-caveats.md)
 10. [Next experiments and learning checklist](10-next-experiments.md)
+11. [Reading the 100-step shakedown like a scientist](11-100-step-shakedown-analysis.md)
+12. [The 1700-step seed-locked stock-vs-BitNet run](12-1700-step-seedlocked-comparison.md)
 
 ## One-sentence status
 

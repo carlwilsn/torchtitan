@@ -31,10 +31,12 @@ The MVP has a working TorchTitan path where a Llama-style 160M config can be con
 | Local syntax checks | Catch import/syntax errors in changed files | Passed |
 | 3-step GPU smoke | Prove stock and BitNet configs enter the real TorchTitan train loop | Passed |
 | 100-step shakedown | Prove a bounded stock-vs-BitNet experiment loop with checkpoints and artifact collection | Passed |
+| 1700-step seed-locked run | First real comparison: seed-locked, real c4, ~55.7M tokens/run, validation emitting loss/ppl | Passed; +0.13-nat FP-vs-ternary gap (1 seed) |
 
-Completed 100-step experiment record:
+Completed experiment records:
 
 - [`../experiments/2026-06-08-100-step-shakedown/README.md`](../experiments/2026-06-08-100-step-shakedown/README.md)
+- [`../results/README.md`](../results/README.md) — 2026-06-09 1700-step seed-locked run
 
 ## Important cost note
 

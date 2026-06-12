@@ -202,6 +202,67 @@ def llama3_160m_bitnet() -> Trainer.Config:
     return config
 
 
+def _llama3_160m_bitnet_ablation(
+    *, activation_quant: bool, weight_quant: bool
+) -> Trainer.Config:
+    """Shared builder for the gap-attribution ablation configs.
+
+    Identical to ``llama3_160m_bitnet`` (same seed lock, same model shape, same
+    training settings, same lm_head filter, same ``pre_norm=True`` structure)
+    except for which quantizers run inside BitLinear's forward. See
+    ``docs/bitnet-160m-mvp/experiments/2026-06-12-gap-attribution/``.
+    """
+
+    config = llama3_160m()
+    config.model_spec = model_registry(
+        "160M",
+        converters=[
+            BitLinearConverter.Config(
+                filter_fqns=["output", "lm_head"],
+                activation_quant=activation_quant,
+                weight_quant=weight_quant,
+                pre_norm=True,
+            )
+        ],
+    )
+    return config
+
+
+def llama3_160m_bitnet_fp16_weights() -> Trainer.Config:
+    """Ablation: BitLinear structure + int8 activation quant, NO ternary weights.
+
+    Weights stay full-precision in the forward pass (no absmean ternarization,
+    no weight STE). Isolates the contribution of weight ternarization: the gap
+    between this and full BitNet is what ternary weights cost.
+    """
+
+    return _llama3_160m_bitnet_ablation(activation_quant=True, weight_quant=False)
+
+
+def llama3_160m_bitnet_no_actquant() -> Trainer.Config:
+    """Ablation: BitLinear structure + ternary weights, NO activation quant.
+
+    Activations flow through unquantized (no per-token int8 absmax, no
+    activation STE). Isolates the contribution of activation quantization: the
+    gap between this and full BitNet is what int8 activations cost.
+    """
+
+    return _llama3_160m_bitnet_ablation(activation_quant=False, weight_quant=True)
+
+
+def llama3_160m_bitnet_structure_only() -> Trainer.Config:
+    """Ablation: BitLinear structure only — no weight or activation quant.
+
+    BitLinear modules with their extra pre-RMSNorm (SubLN-style) are in place,
+    but the forward math is otherwise a plain F.linear. Isolates the purely
+    structural/optimization effect of the extra norms; expected to land at or
+    near stock. Note the head is stock in ALL these configs (filter_fqns), so
+    a separate "fp16 head" variant is redundant — that is already the baseline.
+    """
+
+    return _llama3_160m_bitnet_ablation(activation_quant=False, weight_quant=False)
+
+
 def llama3_8b() -> Trainer.Config:
     return Trainer.Config(
         loss=ChunkedCELoss.Config(),

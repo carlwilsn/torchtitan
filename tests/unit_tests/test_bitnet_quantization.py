@@ -62,6 +62,69 @@ def test_bitlinear_forward_backward_with_prenorm() -> None:
     assert layer.pre_norm.weight.grad is not None
 
 
+def test_bitlinear_ablation_fp16_weights_skips_weight_quant() -> None:
+    """weight_quant=False: forward must use the latent FP weights verbatim."""
+
+    cfg = BitLinear.Config(
+        in_features=8, out_features=4, bias=False,
+        pre_norm=False, activation_quant=False, weight_quant=False,
+    )
+    layer = BitLinear(cfg)
+    layer.init_states()
+
+    x = torch.randn(2, 8)
+    expected = torch.nn.functional.linear(x, layer.weight)
+    assert torch.equal(layer(x), expected)
+
+
+def test_bitlinear_ablation_no_actquant_skips_activation_quant() -> None:
+    """activation_quant=False: only weight ternarization remains."""
+
+    from torchtitan.components.quantization.bitnet import weight_quant as wq
+
+    cfg = BitLinear.Config(
+        in_features=8, out_features=4, bias=False,
+        pre_norm=False, activation_quant=False, weight_quant=True,
+    )
+    layer = BitLinear(cfg)
+    layer.init_states()
+
+    x = torch.randn(2, 8)
+    expected = torch.nn.functional.linear(x, wq(layer.weight))
+    assert torch.equal(layer(x), expected)
+
+
+def test_gap_attribution_configs_set_expected_converter_flags() -> None:
+    """The three ablation registry configs differ from llama3_160m_bitnet only
+    in the converter's quant flags (same seed, steps, lr, filter_fqns)."""
+
+    from torchtitan.models.llama3.config_registry import (
+        llama3_160m_bitnet,
+        llama3_160m_bitnet_fp16_weights,
+        llama3_160m_bitnet_no_actquant,
+        llama3_160m_bitnet_structure_only,
+    )
+
+    base = llama3_160m_bitnet()
+    expectations = {
+        llama3_160m_bitnet_fp16_weights: (True, False),
+        llama3_160m_bitnet_no_actquant: (False, True),
+        llama3_160m_bitnet_structure_only: (False, False),
+    }
+    for fn, (act_q, w_q) in expectations.items():
+        cfg = fn()
+        (converter,) = cfg.model_spec.converters
+        assert converter.activation_quant is act_q, fn.__name__
+        assert converter.weight_quant is w_q, fn.__name__
+        assert converter.pre_norm is True, fn.__name__
+        assert converter.filter_fqns == ["output", "lm_head"], fn.__name__
+        # Everything outside the converter must match the MVP BitNet config.
+        assert cfg.debug.seed == base.debug.seed == 42
+        assert cfg.training.steps == base.training.steps
+        assert cfg.optimizer.lr == base.optimizer.lr
+        assert cfg.training.seq_len == base.training.seq_len
+
+
 class TinyConfigTree(Configurable):
     @dataclass(kw_only=True, slots=True)
     class Config(Configurable.Config):

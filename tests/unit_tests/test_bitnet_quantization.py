@@ -111,13 +111,29 @@ def test_gap_attribution_configs_set_expected_converter_flags() -> None:
         llama3_160m_bitnet_no_actquant: (False, True),
         llama3_160m_bitnet_structure_only: (False, False),
     }
+    def bitlinear_entries(cfg):
+        return [
+            (fqn, lc)
+            for fqn, lc, _parent, _attr in cfg.model_spec.model.traverse(Linear.Config)
+            if isinstance(lc, BitLinear.Config)
+        ]
+
+    base_entries = bitlinear_entries(base)
+    assert len(base_entries) > 0
+
     for fn, (act_q, w_q) in expectations.items():
         cfg = fn()
-        (converter,) = cfg.model_spec.converters
-        assert converter.activation_quant is act_q, fn.__name__
-        assert converter.weight_quant is w_q, fn.__name__
-        assert converter.pre_norm is True, fn.__name__
-        assert converter.filter_fqns == ["output", "lm_head"], fn.__name__
+        entries = bitlinear_entries(cfg)
+        # Same set of converted layers as the MVP BitNet config...
+        assert [fqn for fqn, _ in entries] == [fqn for fqn, _ in base_entries], (
+            fn.__name__
+        )
+        # ...with only the quant flags differing.
+        for fqn, lc in entries:
+            assert lc.activation_quant is act_q, (fn.__name__, fqn)
+            assert lc.weight_quant is w_q, (fn.__name__, fqn)
+            assert lc.pre_norm is True, (fn.__name__, fqn)
+            assert "output" not in fqn and "lm_head" not in fqn, (fn.__name__, fqn)
         # Everything outside the converter must match the MVP BitNet config.
         assert cfg.debug.seed == base.debug.seed == 42
         assert cfg.training.steps == base.training.steps

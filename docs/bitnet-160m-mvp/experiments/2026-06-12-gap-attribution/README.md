@@ -92,6 +92,14 @@ MVP.
   ([`../2026-06-11-fingerprint-smoke/fingerprint.py`](../2026-06-11-fingerprint-smoke/fingerprint.py))
   can be pointed at any variant to confirm what's actually in the forward path.
 
+## Status
+
+**VARIANTS READY (2026-06-12).** All three ablation configs are implemented,
+unit-tested (`tests/unit_tests/test_bitnet_quantization.py`, 6 passed + 1
+env-skip on CPU torch 2.11; the registry test runs on the GPU box's nightly),
+and CPU-smoke-checked (10 AdamW steps per flag combo, all finite and
+decreasing).
+
 ## Results
 
 _Pending — GPU worker fills this in. Expected artifacts: per-variant

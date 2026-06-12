@@ -1,0 +1,6 @@
+/home/ubuntu/torchtitan/outputs/fingerprint_smoke/checkpoint/step-100/.metadata
+/home/ubuntu/torchtitan/outputs/fingerprint_smoke/checkpoint/step-100/__0_0.distcp
+/home/ubuntu/torchtitan/outputs/fingerprint_smoke/checkpoint/step-120/.metadata
+/home/ubuntu/torchtitan/outputs/fingerprint_smoke/checkpoint/step-120/__0_0.distcp
+/home/ubuntu/torchtitan/outputs/fingerprint_smoke/checkpoint/step-50/.metadata
+/home/ubuntu/torchtitan/outputs/fingerprint_smoke/checkpoint/step-50/__0_0.distcp

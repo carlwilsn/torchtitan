@@ -1,0 +1,86 @@
+{
+  "device": "cuda",
+  "torch": "2.12.0.dev20260408+cu128",
+  "conversion": {
+    "configs_converted": 84,
+    "bitlinear_modules_built": 98,
+    "explanation": "QKVLinear builds wk and wv from the same wkv config object, so each transformer layer contributes 6 converted configs but 7 BitLinear modules (wq, wk, wv, wo, w1, w2, w3).",
+    "converted_config_fqns_sample": [
+      "layers.0.attention.qkv_linear.wq",
+      "layers.0.attention.qkv_linear.wkv",
+      "layers.0.attention.wo",
+      "layers.0.feed_forward.w1",
+      "layers.0.feed_forward.w2",
+      "layers.0.feed_forward.w3",
+      "layers.1.attention.qkv_linear.wq",
+      "layers.1.attention.qkv_linear.wkv"
+    ],
+    "bitlinear_module_fqns_sample": [
+      "layers.0.attention.qkv_linear.wq",
+      "layers.0.attention.qkv_linear.wk",
+      "layers.0.attention.qkv_linear.wv",
+      "layers.0.attention.wo",
+      "layers.0.feed_forward.w1",
+      "layers.0.feed_forward.w2",
+      "layers.0.feed_forward.w3",
+      "layers.1.attention.qkv_linear.wq"
+    ],
+    "lm_head_type": "Linear",
+    "tok_embeddings_type": "Embedding",
+    "layers": 14,
+    "param_count": 160062976,
+    "bitlinear_per_layer": [
+      7
+    ]
+  },
+  "weight_quant": {
+    "sample_module": "layers.0.attention.qkv_linear.wq",
+    "gamma_absmean": 0.015979373827576637,
+    "unique_forward_values": [
+      -0.015979,
+      -0.015979,
+      -0.015979,
+      0.0,
+      0.015979,
+      0.015979,
+      0.015979
+    ],
+    "n_unique": 7,
+    "is_ternary": false,
+    "histogram": {
+      "-0.015979": 5245,
+      "+0.000000": 324940,
+      "+0.015979": 4355
+    },
+    "zero_fraction": 0.3098869323730469
+  },
+  "activation_quant": {
+    "input_shape": [
+      4,
+      64
+    ],
+    "unique_levels_per_token_row": [
+      52,
+      52,
+      56,
+      57
+    ],
+    "max_levels_allowed": 256,
+    "all_rows_within_int8_levels": true
+  },
+  "ste_gradient": {
+    "loss": 7.160353660583496,
+    "loss_finite": true,
+    "sample_weight_grad_nonzero_fraction": 1.0,
+    "n_forward_clipped_weights": 242978,
+    "clipped_weights_grad_nonzero_fraction": 1.0,
+    "note": "clipped weights still receiving grad == identity STE active"
+  },
+  "stock_vs_bitnet_forward": {
+    "same_seed_same_tokens": true,
+    "mean_abs_logit_diff": 1.1116907596588135,
+    "max_abs_logit_diff": 6.578073024749756,
+    "outputs_differ": true,
+    "stock_bitlinear_modules": 0
+  }
+}

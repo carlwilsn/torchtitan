@@ -105,3 +105,36 @@ decreasing).
 _Pending — GPU worker fills this in. Expected artifacts: per-variant
 `*_curves.jsonl` (train.loss / eval.loss / eval.perplexity), final-number table,
 and an attribution note comparing against the prediction above._
+
+## Diagnostics
+
+Two analysis scripts live next to this README (diagnostics lane, separate from
+the config/variant lane above):
+
+- **[`probe_stats.py`](probe_stats.py)** — per-layer quantization probe. Given
+  any of the 5 arm config names (`--config llama3_160m_bitnet_fp16_weights`,
+  …) and optionally a DCP checkpoint (`--checkpoint outputs/<cfg>/checkpoint/step-1700`),
+  it builds the model and reports per probed layer: ternary code fractions
+  (−1/0/+1), absmean weight scale γ, latent-weight Frobenius norm/absmax, and
+  per-token activation-absmax stats on a fixed-seed sample batch (raw input
+  and post-pre-norm, i.e. what act-quant actually sees). For arms with quant
+  flags off (including stock) the same statistics are computed on the FP
+  weights/activations — hypothetical codes — so curves are comparable across
+  all arms; `*_quant_active` flags record what actually runs in the forward.
+  Needs the GPU box's torch nightly for the full-model build (the llama3
+  package imports nightly-only FSDP symbols); the stats core is CPU-tested.
+
+- **[`summarize.py`](summarize.py)** — per-arm summary table from the
+  structured-logger JSONL curves
+  (`summarize.py stock=...jsonl bitnet=...jsonl fp16_weights=...jsonl ...`):
+  final train/eval loss, eval ppl, gap vs baseline (default `stock`), best
+  eval loss + step, and median tps / peak memory / grad_norm if those events
+  ever appear in the JSONL (currently they go to TB/W&B only, so those columns
+  print `--`). Verified against the committed MVP curves — it reproduces
+  stock 1.4123/1.4342 and bitnet 1.5438/1.5576 (gap +0.1314/+0.1233) exactly.
+
+Suggested GPU-side use after each arm finishes: run `summarize.py` over all
+available curves for the running attribution table, and `probe_stats.py
+--checkpoint .../step-1700` per arm to compare γ, zero-fraction, and
+activation absmax between arms (e.g. does act-quant change the weight-scale
+landscape even when ternarization is off?).

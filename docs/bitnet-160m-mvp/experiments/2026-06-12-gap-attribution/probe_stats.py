@@ -99,6 +99,8 @@ def weight_stats(module: torch.nn.Module, eps: float = 1e-5) -> dict:
 
 
 def build_model(config_name: str, device: torch.device):
+    from torchtitan.models.llama3 import config_registry  # deferred: needs nightly
+
     if not hasattr(config_registry, config_name):
         raise SystemExit(
             f"unknown config {config_name!r}; expected one of {ARMS} "
@@ -129,6 +131,8 @@ def load_dcp_checkpoint(model: torch.nn.Module, checkpoint_path: str) -> dict:
 
 def probed_modules(model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
     """The converter-eligible linears: BitLinear if present, else stock Linear."""
+    from torchtitan.models.common.nn_modules import Linear  # deferred: needs nightly
+
     bit = [
         (fqn, m) for fqn, m in model.named_modules() if isinstance(m, BitLinear)
     ]

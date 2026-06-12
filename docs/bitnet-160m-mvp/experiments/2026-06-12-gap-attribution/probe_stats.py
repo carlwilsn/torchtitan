@@ -51,9 +51,12 @@ REPO_ROOT = os.path.abspath(
 )
 sys.path.insert(0, REPO_ROOT)
 
+# NOTE: only the CPU-safe bitnet import lives at module level. The llama3
+# package import (config_registry / model build) requires the GPU box's torch
+# nightly (its parallelize.py imports DataParallelMeshDims, absent in stable
+# torch), so it is deferred into build_model() -- this keeps the stats core of
+# this script importable and unit-smokeable on a stable-torch CPU machine.
 from torchtitan.components.quantization.bitnet import BitLinear  # noqa: E402
-from torchtitan.models.common.nn_modules import Linear  # noqa: E402
-from torchtitan.models.llama3 import config_registry  # noqa: E402
 
 ARMS = (
     "llama3_160m",

@@ -15,3 +15,4 @@ Each experiment folder should contain:
 ## Experiments
 
 - [2026-06-08 100-step stock-vs-BitNet shakedown](2026-06-08-100-step-shakedown/README.md)
+- [2026-06-11 fingerprint smoke — clean-clone FSDP guard, 84-vs-98 reconciliation, STE evidence, checkpoint resume](2026-06-11-fingerprint-smoke/README.md)

@@ -218,6 +218,104 @@ def _160m(attn_backend: str) -> Llama3Model.Config:
     )
 
 
+def _50m(attn_backend: str) -> Llama3Model.Config:
+    """~50M-parameter Llama-style rung for the BitNet scaling sweep.
+
+    Same family as ``_160m`` (vocab_size=2048 so embeddings stay negligible and
+    the param axis is the transformer body, weight tying on, head_dim=64,
+    n_kv_heads = n_heads / 4 GQA grouping, SwiGLU ffn via compute_ffn_hidden_dim
+    with multiple_of=256 / ffn_dim_multiplier=1.0). Body ~= 49.6M params.
+    """
+
+    dim = 768
+    n_heads = 12
+    n_kv_heads = 3
+    n_layers = 8
+    vocab_size = 2048
+    return Llama3Model.Config(
+        dim=dim,
+        vocab_size=vocab_size,
+        enable_weight_tying=True,
+        tok_embeddings=Embedding.Config(
+            num_embeddings=vocab_size,
+            embedding_dim=dim,
+            param_init=_EMBEDDING_INIT,
+        ),
+        norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
+        lm_head=Linear.Config(
+            in_features=dim,
+            out_features=vocab_size,
+            param_init=_output_linear_init(dim),
+        ),
+        rope=RoPE.Config(
+            dim=dim // n_heads,
+            max_seq_len=131072,
+            theta=500000,
+            backend="complex",
+            scaling="llama",
+        ),
+        layers=_build_llama3_layers(
+            n_layers=n_layers,
+            dim=dim,
+            n_heads=n_heads,
+            n_kv_heads=n_kv_heads,
+            hidden_dim=compute_ffn_hidden_dim(
+                dim, multiple_of=256, ffn_dim_multiplier=1.0
+            ),
+            attn_backend=attn_backend,
+        ),
+    )
+
+
+def _400m(attn_backend: str) -> Llama3Model.Config:
+    """~400M-parameter Llama-style rung for the BitNet scaling sweep.
+
+    Same family as ``_160m`` (vocab_size=2048 so embeddings stay negligible and
+    the param axis is the transformer body, weight tying on, head_dim=64,
+    n_kv_heads = n_heads / 4 GQA grouping, SwiGLU ffn via compute_ffn_hidden_dim
+    with multiple_of=256 / ffn_dim_multiplier=1.0). Body ~= 396M params.
+    """
+
+    dim = 1536
+    n_heads = 24
+    n_kv_heads = 6
+    n_layers = 16
+    vocab_size = 2048
+    return Llama3Model.Config(
+        dim=dim,
+        vocab_size=vocab_size,
+        enable_weight_tying=True,
+        tok_embeddings=Embedding.Config(
+            num_embeddings=vocab_size,
+            embedding_dim=dim,
+            param_init=_EMBEDDING_INIT,
+        ),
+        norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
+        lm_head=Linear.Config(
+            in_features=dim,
+            out_features=vocab_size,
+            param_init=_output_linear_init(dim),
+        ),
+        rope=RoPE.Config(
+            dim=dim // n_heads,
+            max_seq_len=131072,
+            theta=500000,
+            backend="complex",
+            scaling="llama",
+        ),
+        layers=_build_llama3_layers(
+            n_layers=n_layers,
+            dim=dim,
+            n_heads=n_heads,
+            n_kv_heads=n_kv_heads,
+            hidden_dim=compute_ffn_hidden_dim(
+                dim, multiple_of=256, ffn_dim_multiplier=1.0
+            ),
+            attn_backend=attn_backend,
+        ),
+    )
+
+
 def _1b(attn_backend: str) -> Llama3Model.Config:
     dim = 2048
     n_heads = 32
@@ -417,7 +515,9 @@ def _405b(attn_backend: str) -> Llama3Model.Config:
 llama3_configs = {
     "debugmodel": _debugmodel,
     "debugmodel_fused_qkv": _debugmodel_fused_qkv,
+    "50M": _50m,
     "160M": _160m,
+    "400M": _400m,
     "1B": _1b,
     "3B": _3b,
     "8B": _8b,

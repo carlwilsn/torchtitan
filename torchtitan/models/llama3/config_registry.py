@@ -263,6 +263,78 @@ def llama3_160m_bitnet_structure_only() -> Trainer.Config:
     return _llama3_160m_bitnet_ablation(activation_quant=False, weight_quant=False)
 
 
+def llama3_50m() -> Trainer.Config:
+    """~50M stock TorchTitan Llama-style training rung (scaling sweep).
+
+    Exact analog of ``llama3_160m`` (same seed lock, optimizer, lr_scheduler,
+    training/dataloader/metrics/checkpoint/validator settings) but pointed at
+    the "50M" model flavor. See ``llama3_160m`` for the seed-lock rationale.
+    """
+
+    config = llama3_160m()
+    config.model_spec = model_registry("50M")
+    return config
+
+
+def llama3_50m_bitnet() -> Trainer.Config:
+    """~50M BitNet b1.58-style rung (scaling sweep).
+
+    Identical training setup to ``llama3_50m`` but swaps internal Linear layers
+    to BitLinear via the IDENTICAL BitLinearConverter config used by
+    ``llama3_160m_bitnet`` (lm_head/output left as normal Linear).
+    """
+
+    config = llama3_50m()
+    config.model_spec = model_registry(
+        "50M",
+        converters=[
+            BitLinearConverter.Config(
+                filter_fqns=["output", "lm_head"],
+                activation_quant=True,
+                weight_quant=True,
+                pre_norm=True,
+            )
+        ],
+    )
+    return config
+
+
+def llama3_400m() -> Trainer.Config:
+    """~400M stock TorchTitan Llama-style training rung (scaling sweep).
+
+    Exact analog of ``llama3_160m`` (same seed lock, optimizer, lr_scheduler,
+    training/dataloader/metrics/checkpoint/validator settings) but pointed at
+    the "400M" model flavor. See ``llama3_160m`` for the seed-lock rationale.
+    """
+
+    config = llama3_160m()
+    config.model_spec = model_registry("400M")
+    return config
+
+
+def llama3_400m_bitnet() -> Trainer.Config:
+    """~400M BitNet b1.58-style rung (scaling sweep).
+
+    Identical training setup to ``llama3_400m`` but swaps internal Linear layers
+    to BitLinear via the IDENTICAL BitLinearConverter config used by
+    ``llama3_160m_bitnet`` (lm_head/output left as normal Linear).
+    """
+
+    config = llama3_400m()
+    config.model_spec = model_registry(
+        "400M",
+        converters=[
+            BitLinearConverter.Config(
+                filter_fqns=["output", "lm_head"],
+                activation_quant=True,
+                weight_quant=True,
+                pre_norm=True,
+            )
+        ],
+    )
+    return config
+
+
 def llama3_8b() -> Trainer.Config:
     return Trainer.Config(
         loss=ChunkedCELoss.Config(),

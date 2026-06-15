@@ -1,5 +1,15 @@
 import torch
-from torchtitan.models.llama3 import model_registry
+
+# Local torch is newer than torchtitan pins; shim the one missing FSDP symbol
+# that torchtitan.models.llama3.parallelize imports, so we can build the model
+# config and count params. This does NOT touch the model math at all.
+import torch.distributed.fsdp as _fsdp
+
+for _name in ("DataParallelMeshDims", "FSDPMeshDims", "HSDPMeshDims"):
+    if not hasattr(_fsdp, _name):
+        setattr(_fsdp, _name, type(_name, (), {}))
+
+from torchtitan.models.llama3 import model_registry  # noqa: E402
 
 
 def build(flavor):

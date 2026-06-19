@@ -1,0 +1,6 @@
+GPU: NVIDIA A10, 23028 MiB, 570.148.08
+torch: 2.12.0.dev20260408+cu128
+python: Python 3.10.12
+commit: 0e53726f1b83cd05cb66dce2c5de7c0829eaddfd
+started: 2026-06-19T08:51:57Z
+finished: 2026-06-19T12:58:50Z

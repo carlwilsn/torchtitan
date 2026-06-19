@@ -1,0 +1,12 @@
+RUN stock_s42 exit code: 0
+RUN stock_s42 curve lines: 193
+RUN stock_s43 exit code: 0
+RUN stock_s43 curve lines: 193
+RUN stock_s44 exit code: 0
+RUN stock_s44 curve lines: 193
+RUN bitnet_s42 exit code: 0
+RUN bitnet_s42 curve lines: 193
+RUN bitnet_s43 exit code: 0
+RUN bitnet_s43 curve lines: 193
+RUN bitnet_s44 exit code: 0
+RUN bitnet_s44 curve lines: 193

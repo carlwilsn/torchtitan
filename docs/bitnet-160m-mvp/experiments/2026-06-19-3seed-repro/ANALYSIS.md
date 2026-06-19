@@ -96,24 +96,37 @@ Net: **4/4 substantive predictions hit**; the only miss is the stock σ being ~2
 
 ## 6. Operational failure (what broke, for the record)
 
-The science is clean; the *automation* failed at the seam:
+The science is clean; the *automation* failed at the seam. Two causes, in order of importance:
 
-1. The corrected WatchRun (`run_4243a6de-2`, tailing real progress) **last checked at ~07:29 EDT
-   and then stopped checking** — it never observed SWEEP_DONE at 08:58 EDT and never fired the
-   DONE wake. ListRuns showed it frozen at "RUN 4/6 bitnet_s42 step:920", 442 min stale.
-2. The Phase-2 worker (`5b46027e-22c`) went idle ~07:51 EDT (before the sweep even finished) and
-   never executed its standing "on SWEEP_DONE → commit/push, leave box running" instruction.
-3. Result: the sweep completed perfectly and unattended (criterion 2's "survives SSH" goal — met),
-   but **nobody tore the box down**, so it idled for ~6 hours.
-4. Teardown finally happened ~14:52 EDT (artifacts committed+pushed as `3a90c1658`, box terminated),
-   overlapping this mission backup self-check.
+**PRIMARY — the host laptop went to sleep.** The machine running the overnight supervisor was
+suspended when the laptop slept, which froze the entire heartbeat/teardown loop along with the OS.
+The sweep completed fine and wrote `SWEEP_DONE.txt` at 08:58 EDT, but the supervisor process was
+not *running* to observe it. This is the dominant cause: teardown didn't fail to *decide*, it never
+got a chance to *execute* — the process was suspended, not merely fooled. Everything resumed only
+once the host woke and the mission's backup self-check ran (~14:52 EDT).
 
-**Carry-forward lessons:**
-- A done-sentinel must be backed by a trigger that is *itself* monitored for liveness — a watcher
-  that silently stops checking is worse than no watcher (it gives false comfort).
-- Teardown should be driven off the sentinel by something that cannot go idle (a deterministic
-  run-watcher with a teardown action), not delegated to a worker turn that can end.
-- The earlier lesson still holds: a WatchRun check_command must emit a *changing* progress note.
+**SECONDARY — the done-trigger watched live step-progress, not the sentinel.** Independent of host
+sleep, the design was fragile:
+1. The corrected WatchRun (`run_4243a6de-2`) tailed live `step:` / `loss` progress. Live progress
+   freezes *identically* whether a job *finishes* or *hangs*, so on completion it would trip
+   "stalled" rather than fire "done." ListRuns showed it frozen at "RUN 4/6 bitnet_s42 step:920".
+2. The Phase-2 worker (`5b46027e-22c`) went idle ~07:51 EDT and never executed its standing
+   "on SWEEP_DONE → commit/push" instruction.
+3. So even with the host awake, teardown was delegated to triggers that could go quiet. Result: the
+   sweep ran perfectly and unattended (criterion 2's "survives SSH" — met), but nobody tore the box
+   down, and it idled ~6 hours.
+4. Teardown finally happened ~14:52 EDT (artifacts committed+pushed as `3a90c1658`, box terminated).
+
+**Carry-forward lessons / mitigation (defense in depth — no single sleeping machine should leave a
+box billing):**
+- **Keep the host awake for the duration of an unattended run** (disable sleep / `caffeinate`), or
+  run the supervisor somewhere that doesn't sleep — a small always-on box or a server-side watchdog.
+  This addresses the primary cause directly.
+- **Make the sweep self-terminate its own GPU box on sentinel write**, so teardown never depends on
+  an external supervisor being alive at all. This is the strongest single mitigation.
+- The done-trigger must test for the **`SWEEP_DONE.txt` sentinel file**, not live step-progress — a
+  watcher that conflates "finished" with "hung" gives false comfort. And a WatchRun check_command
+  must emit a *changing* progress note so liveness itself is observable.
 
 ---
 
